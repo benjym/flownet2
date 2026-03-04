@@ -98,6 +98,31 @@ Current suite covers:
 - Zoom/pan behavior
 - URL-based preset loading and preset switching
 
+## CI/CD: GitHub Pages
+
+This repo includes a GitHub Actions workflow at:
+
+- `.github/workflows/ci-cd-pages.yml`
+
+What it does:
+
+1. On every push to `main` and every pull request:
+- Installs dependencies
+- Builds the app
+- Runs Playwright E2E tests
+2. On pushes to `main` only:
+- Builds with the correct GitHub Pages base path
+- Publishes `dist/` to GitHub Pages
+
+### One-time GitHub setup
+
+In your repository settings:
+
+1. Go to **Settings -> Pages**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+
+After that, every successful push to `main` will auto-deploy.
+
 ## Notes
 
 - Solver is a structured-grid finite-difference model with SOR iteration.
