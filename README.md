@@ -51,9 +51,16 @@ npm run build
 - Drag polygon vertices to reshape
 - `Alt` + click edge to insert a vertex
 - `Ctrl`/`Cmd` + click a vertex to delete it (minimum 3 kept)
+  - Cursor shows `+`/`-` cues for add/remove while modifier keys are held
 4. Keep **Auto-solve** on, or click **Solve now**.
 5. Use **Boundary List** to select/edit items.
 6. Click **Download PNG** to save the visualization.
+7. Use **Save state** to export your current model as JSON.
+8. Use **Load file** (or drag/drop a JSON file onto the page) to restore a saved model.
+
+When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display to toggle between:
+- `Real (x, y)`
+- `Transformed (x', y')` where `x' = x*sqrt(Ky/Kx)` and `y' = y`
 
 ## Precision Controls (Desktop + Mobile)
 

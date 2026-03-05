@@ -1,7 +1,6 @@
-import './style.css';
-
 type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'standpipe';
 type LineKind = 'equipotential' | 'phreatic' | 'noflow';
+type CoordinateMode = 'real' | 'transformed';
 
 interface Point {
   x: number;
@@ -40,6 +39,7 @@ interface ViewSettings {
   contours: number;
   streamlines: number;
   autoSolve: boolean;
+  coordinateMode: CoordinateMode;
 }
 
 interface ContourSegment {
@@ -93,6 +93,19 @@ interface ExamplePreset {
   lines: PresetLine[];
   polygons?: PresetPolygon[];
   standpipePoint?: Point;
+}
+
+interface PersistedFlowNetStateV1 {
+  schema: 'flownet2-state';
+  version: 1;
+  savedAt: string;
+  domain: DomainSettings;
+  solver: SolverSettings;
+  view: ViewSettings;
+  newHead: number;
+  lineBoundaries: LineBoundary[];
+  polygons: NoFlowPolygon[];
+  standpipePoint: Point | null;
 }
 
 type Selected = { kind: 'line'; id: number } | { kind: 'polygon'; id: number } | null;
@@ -159,7 +172,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'Two equipotential boundaries produce near-parallel flow through homogeneous soil.',
     domain: { width: 30, height: 12 },
     solver: { nx: 81, ny: 41, kx: 1, ky: 1, maxIter: 4000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 14, streamlines: 12, autoSolve: true },
+    view: { contours: 14, streamlines: 12, autoSolve: true, coordinateMode: 'real' },
     newHead: 8,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
@@ -172,7 +185,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'Upstream/downstream heads with a phreatic surface and an impermeable central core polygon.',
     domain: { width: 45, height: 16 },
     solver: { nx: 101, ny: 51, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 16, streamlines: 14, autoSolve: true },
+    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
     newHead: 10,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 16 }, head: 13 },
@@ -197,7 +210,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'An impermeable cutoff-wall polygon forces seepage to dive deeper below the wall tip.',
     domain: { width: 38, height: 12 },
     solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.65 },
-    view: { contours: 16, streamlines: 14, autoSolve: true },
+    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
     newHead: 9,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
@@ -221,7 +234,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'Regional gradient with a low-head drain line and an impermeable inclusion to bend paths.',
     domain: { width: 32, height: 12 },
     solver: { nx: 91, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 15, streamlines: 16, autoSolve: true },
+    view: { contours: 15, streamlines: 16, autoSolve: true, coordinateMode: 'real' },
     newHead: 8,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 9.5 },
@@ -247,7 +260,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'A thin sheet-pile polygon interrupts shallow flow and bends equipotentials below its tip.',
     domain: { width: 40, height: 12 },
     solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5200, tolerance: 1e-4, omega: 1.65 },
-    view: { contours: 16, streamlines: 14, autoSolve: true },
+    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
     newHead: 9,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10.5 },
@@ -271,7 +284,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     summary: 'Same boundary heads with Kx > Ky to illustrate non-orthogonal EP/flow-line behavior.',
     domain: { width: 30, height: 12 },
     solver: { nx: 81, ny: 41, kx: 4, ky: 1, maxIter: 4500, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 14, streamlines: 12, autoSolve: true },
+    view: { contours: 14, streamlines: 12, autoSolve: true, coordinateMode: 'real' },
     newHead: 8,
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
@@ -281,133 +294,9 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
   },
 ];
 
-const appEl = document.querySelector<HTMLDivElement>('#app');
-if (!appEl) {
-  throw new Error('Missing #app container');
-}
-
-appEl.innerHTML = `
-  <div class="layout">
-    <aside class="panel">
-      <h1>Flow Net Studio</h1>
-      <p class="subhead">2D anisotropic groundwater flow for first-time undergrad soil mechanics.</p>
-
-      <section class="group">
-        <h2>Quick Start</h2>
-        <ol class="quick-start">
-          <li>Use default EP boundaries or draw your own BCs.</li>
-          <li>Press <strong>Solve now</strong> (or keep Auto-solve on).</li>
-          <li>Switch to <strong>Standpipe</strong> and click to read water rise.</li>
-        </ol>
-      </section>
-
-      <section class="group">
-        <h2>Examples</h2>
-        <label>Preset case
-          <select id="exampleSelect"></select>
-        </label>
-        <div class="action-row">
-          <button id="loadExampleBtn" type="button">Load example</button>
-          <button id="copyExampleLinkBtn" type="button">Copy URL</button>
-        </div>
-        <p id="exampleSummary" class="hint"></p>
-        <p id="exampleUrlHint" class="hint"></p>
-      </section>
-
-      <section class="group">
-        <h2>Domain + Material</h2>
-        <div class="grid two-col">
-          <label>Width (m)<input id="domainWidth" type="number" min="5" step="1" value="30"></label>
-          <label>Height (m)<input id="domainHeight" type="number" min="3" step="1" value="12"></label>
-          <label>Grid Nx<input id="gridNx" type="number" min="11" max="201" step="2" value="81"></label>
-          <label>Grid Ny<input id="gridNy" type="number" min="11" max="201" step="2" value="41"></label>
-          <label>Kx<input id="kx" type="number" min="0.01" step="0.1" value="1"></label>
-          <label>Ky<input id="ky" type="number" min="0.01" step="0.1" value="1"></label>
-        </div>
-      </section>
-
-      <section class="group">
-        <h2>Drawing Tools</h2>
-        <div class="tool-row" id="toolRow">
-          <button data-tool="select" class="is-active">Select</button>
-          <button data-tool="equipotential">EP line</button>
-          <button data-tool="phreatic">Phreatic</button>
-          <button data-tool="noflow-line">No-flow line</button>
-          <button data-tool="noflow-zone">No-flow polygon</button>
-          <button data-tool="standpipe">Standpipe</button>
-        </div>
-        <label>New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
-        <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
-        <p id="toolStep" class="hint step-hint"></p>
-      </section>
-
-      <section class="group">
-        <h2>Solver + Display</h2>
-        <div class="grid two-col">
-          <label>Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
-          <label>Tolerance<input id="tolerance" type="number" min="0.000001" step="0.00001" value="0.0001"></label>
-          <label>SOR omega<input id="omega" type="number" min="1" max="1.95" step="0.05" value="1.6"></label>
-          <label>Contours<input id="contours" type="number" min="3" max="30" step="1" value="14"></label>
-          <label>Flow lines<input id="streamlines" type="number" min="4" max="36" step="1" value="12"></label>
-          <label class="inline-check"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
-        </div>
-        <div class="action-row">
-          <button id="solveBtn">Solve now</button>
-          <button id="resetBtn">Reset example</button>
-          <button id="exportBtn">Download PNG</button>
-          <button id="deleteBtn" class="danger">Delete selected</button>
-        </div>
-        <p id="statusText" class="status">Waiting for first solve.</p>
-      </section>
-
-      <section class="group" id="selectionBlock">
-        <h2>Selected Item</h2>
-        <p id="selectionType">Nothing selected.</p>
-        <label id="selectedHeadRow" class="is-hidden">EP head (m)<input id="selectedHead" type="number" step="0.1" value="8"></label>
-      </section>
-
-      <section class="group">
-        <h2>Boundary List</h2>
-        <p id="inventorySummary" class="inventory-summary"></p>
-        <div id="inventoryList" class="inventory-list"></div>
-      </section>
-
-      <section class="group">
-        <h2>Standpipe</h2>
-        <p id="standpipeText">Choose the standpipe tool and click inside the domain.</p>
-      </section>
-
-      <section class="group">
-        <h2>Guide</h2>
-        <ul>
-          <li>Default outer boundary is no-flow unless you draw EP/phreatic lines.</li>
-          <li>EP lines impose fixed hydraulic head.</li>
-          <li>Phreatic line is a user-drawn fixed head equal to elevation.</li>
-          <li>No-flow lines and no-flow polygons act as impermeable boundaries.</li>
-          <li>Canvas controls: <strong>+</strong>/<strong>-</strong> zoom, <strong>Pan</strong> drag, <strong>Fit</strong> reset view.</li>
-          <li>Keyboard: <strong>Esc</strong> cancels drawing, <strong>Delete</strong> removes selected item.</li>
-        </ul>
-      </section>
-    </aside>
-
-    <main class="canvas-wrap">
-      <div class="canvas-toolbar">
-        <p id="canvasPrompt">Select a tool, draw boundaries, then solve and probe with the standpipe.</p>
-        <div class="view-controls">
-          <button id="zoomOutBtn" type="button" aria-label="Zoom out">-</button>
-          <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>
-          <button id="fitViewBtn" type="button">Fit</button>
-          <button id="panModeBtn" type="button">Pan: Off</button>
-          <span id="zoomLabel" class="zoom-label">100%</span>
-        </div>
-      </div>
-      <canvas id="flowCanvas"></canvas>
-    </main>
-  </div>
-`;
-
 const canvas = byId<HTMLCanvasElement>('flowCanvas');
 const ctx = getContext2D(canvas);
+const canvasWrap = byId<HTMLElement>('canvasWrap');
 
 const domainWidthInput = byId<HTMLInputElement>('domainWidth');
 const domainHeightInput = byId<HTMLInputElement>('domainHeight');
@@ -421,6 +310,7 @@ const toleranceInput = byId<HTMLInputElement>('tolerance');
 const omegaInput = byId<HTMLInputElement>('omega');
 const contoursInput = byId<HTMLInputElement>('contours');
 const streamlinesInput = byId<HTMLInputElement>('streamlines');
+const coordModeSelect = byId<HTMLSelectElement>('coordMode');
 const autoSolveInput = byId<HTMLInputElement>('autoSolve');
 const statusText = byId<HTMLParagraphElement>('statusText');
 const standpipeText = byId<HTMLParagraphElement>('standpipeText');
@@ -430,23 +320,22 @@ const selectedHeadInput = byId<HTMLInputElement>('selectedHead');
 const toolHint = byId<HTMLParagraphElement>('toolHint');
 const toolStep = byId<HTMLParagraphElement>('toolStep');
 const solveBtn = byId<HTMLButtonElement>('solveBtn');
-const resetBtn = byId<HTMLButtonElement>('resetBtn');
 const exportBtn = byId<HTMLButtonElement>('exportBtn');
+const saveStateBtn = byId<HTMLButtonElement>('saveStateBtn');
+const loadStateBtn = byId<HTMLButtonElement>('loadStateBtn');
+const loadStateInput = byId<HTMLInputElement>('loadStateInput');
 const deleteBtn = byId<HTMLButtonElement>('deleteBtn');
 const toolRow = byId<HTMLDivElement>('toolRow');
 const inventorySummary = byId<HTMLParagraphElement>('inventorySummary');
 const inventoryList = byId<HTMLDivElement>('inventoryList');
-const canvasPrompt = byId<HTMLParagraphElement>('canvasPrompt');
+// const canvasPrompt = byId<HTMLParagraphElement>('canvasPrompt');
 const zoomInBtn = byId<HTMLButtonElement>('zoomInBtn');
 const zoomOutBtn = byId<HTMLButtonElement>('zoomOutBtn');
 const fitViewBtn = byId<HTMLButtonElement>('fitViewBtn');
 const panModeBtn = byId<HTMLButtonElement>('panModeBtn');
 const zoomLabel = byId<HTMLSpanElement>('zoomLabel');
 const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
-const loadExampleBtn = byId<HTMLButtonElement>('loadExampleBtn');
-const copyExampleLinkBtn = byId<HTMLButtonElement>('copyExampleLinkBtn');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
-const exampleUrlHint = byId<HTMLParagraphElement>('exampleUrlHint');
 
 const toolButtons = Array.from(toolRow.querySelectorAll<HTMLButtonElement>('button[data-tool]'));
 
@@ -468,6 +357,7 @@ const state = {
     contours: 14,
     streamlines: 12,
     autoSolve: true,
+    coordinateMode: 'real',
   } as ViewSettings,
   tool: 'select' as Tool,
   pendingLineStart: null as Point | null,
@@ -488,10 +378,19 @@ const state = {
   },
   coarsePointer: window.matchMedia('(pointer: coarse)').matches,
   lastPointerType: 'mouse',
+  hoverPoint: null as Point | null,
+  modifiers: {
+    alt: false,
+    ctrl: false,
+    meta: false,
+  },
   solution: null as Solution | null,
 };
 
 let solveTimer: number | null = null;
+let fileDragDepth = 0;
+const CURSOR_PLUS = buildModifierCursor('plus');
+const CURSOR_MINUS = buildModifierCursor('minus');
 
 wireControls();
 initExamplePicker();
@@ -499,9 +398,11 @@ const initialExampleId = getRequestedExampleFromUrl() ?? DEFAULT_EXAMPLE_ID;
 loadExampleById(initialExampleId, { updateUrl: false, solve: false });
 resizeCanvas();
 solveAndRender();
+updateCanvasCursor();
 window.addEventListener('resize', () => {
   resizeCanvas();
   render();
+  updateCanvasCursor();
 });
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -530,21 +431,7 @@ function initExamplePicker(): void {
   });
 
   exampleSelect.addEventListener('change', () => {
-    updateExampleSummary();
-  });
-
-  loadExampleBtn.addEventListener('click', () => {
     loadExampleById(exampleSelect.value);
-  });
-
-  copyExampleLinkBtn.addEventListener('click', async () => {
-    const url = buildExampleUrl(exampleSelect.value);
-    try {
-      await navigator.clipboard.writeText(url);
-      exampleSummary.textContent = `${currentExampleSummary()} Link copied: ${url}`;
-    } catch {
-      exampleSummary.textContent = `${currentExampleSummary()} Copy failed. Use: ${url}`;
-    }
   });
 
   updateExampleSummary();
@@ -583,6 +470,7 @@ function loadExampleById(
   state.drag = { type: 'none' };
   state.standpipePoint = preset.standpipePoint ? { ...preset.standpipePoint } : null;
   state.standpipeReading = null;
+  state.solution = null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.camera.panMode = false;
@@ -612,6 +500,7 @@ function loadExampleById(
   omegaInput.value = String(state.solver.omega);
   contoursInput.value = String(state.view.contours);
   streamlinesInput.value = String(state.view.streamlines);
+  coordModeSelect.value = state.view.coordinateMode;
   autoSolveInput.checked = state.view.autoSolve;
   exampleSelect.value = preset.id;
 
@@ -634,26 +523,13 @@ function setExampleInUrl(presetId: string): void {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-function buildExampleUrl(presetId: string): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set('example', presetId);
-  return url.toString();
-}
-
-function currentExampleSummary(): string {
-  const preset = EXAMPLE_PRESETS.find((item) => item.id === exampleSelect.value);
-  return preset ? `${preset.label}: ${preset.summary}` : '';
-}
-
 function updateExampleSummary(): void {
   const preset = EXAMPLE_PRESETS.find((item) => item.id === exampleSelect.value);
   if (!preset) {
     exampleSummary.textContent = '';
-    exampleUrlHint.innerHTML = '';
     return;
   }
   exampleSummary.textContent = `${preset.label}: ${preset.summary}`;
-  exampleUrlHint.innerHTML = `URL parameter: <code>?example=${preset.id}</code>`;
 }
 
 function wireControls(): void {
@@ -687,6 +563,12 @@ function wireControls(): void {
     }
   });
 
+  coordModeSelect.addEventListener('change', () => {
+    state.view.coordinateMode = coordModeSelect.value === 'transformed' ? 'transformed' : 'real';
+    updateGuidanceUI();
+    render();
+  });
+
   selectedHeadInput.addEventListener('change', () => {
     if (state.selected?.kind !== 'line') {
       return;
@@ -714,12 +596,25 @@ function wireControls(): void {
     solveAndRender();
   });
 
-  resetBtn.addEventListener('click', () => {
-    resetExample();
-  });
-
   exportBtn.addEventListener('click', () => {
     exportCanvasPng();
+  });
+
+  saveStateBtn.addEventListener('click', () => {
+    exportStateJson();
+  });
+
+  loadStateBtn.addEventListener('click', () => {
+    loadStateInput.click();
+  });
+
+  loadStateInput.addEventListener('change', async () => {
+    const file = loadStateInput.files?.[0];
+    loadStateInput.value = '';
+    if (!file) {
+      return;
+    }
+    await importStateFromFile(file);
   });
 
   deleteBtn.addEventListener('click', () => {
@@ -740,6 +635,7 @@ function wireControls(): void {
     state.camera.panMode = false;
     updateGuidanceUI();
     render();
+    updateCanvasCursor();
   });
 
   panModeBtn.addEventListener('click', () => {
@@ -751,14 +647,23 @@ function wireControls(): void {
     }
     updateGuidanceUI();
     render();
+    updateCanvasCursor();
   });
 
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+  });
   canvas.addEventListener('wheel', onWheel, { passive: false });
+  window.addEventListener('dragenter', onWindowDragEnter);
+  window.addEventListener('dragover', onWindowDragOver);
+  window.addEventListener('dragleave', onWindowDragLeave);
+  window.addEventListener('drop', onWindowDrop);
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
 }
 
 function readInputsIntoState(): void {
@@ -879,6 +784,9 @@ function clampCameraCenter(center: Point, zoom = state.camera.zoom): Point {
 }
 
 function onKeyDown(event: KeyboardEvent): void {
+  syncModifierState(event);
+  updateCanvasCursor();
+
   if (event.key === 'Escape') {
     const hadPendingDraw =
       state.pendingLineStart !== null ||
@@ -894,6 +802,7 @@ function onKeyDown(event: KeyboardEvent): void {
     state.camera.panMode = false;
     updateGuidanceUI();
     render();
+    updateCanvasCursor();
     return;
   }
 
@@ -901,6 +810,11 @@ function onKeyDown(event: KeyboardEvent): void {
     event.preventDefault();
     deleteSelected();
   }
+}
+
+function onKeyUp(event: KeyboardEvent): void {
+  syncModifierState(event);
+  updateCanvasCursor();
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -922,6 +836,7 @@ function deleteSelected(): void {
   state.selected = null;
   updateSelectionPanel();
   scheduleSolve();
+  updateCanvasCursor();
 }
 
 function readNumber(input: HTMLInputElement, fallback: number, min: number, max: number): number {
@@ -948,10 +863,7 @@ function setTool(tool: Tool): void {
   });
   updateGuidanceUI();
   render();
-}
-
-function resetExample(): void {
-  loadExampleById(DEFAULT_EXAMPLE_ID);
+  updateCanvasCursor();
 }
 
 function addBoundary(kind: LineKind, p1: Point, p2: Point, head: number): void {
@@ -966,12 +878,16 @@ function addBoundary(kind: LineKind, p1: Point, p2: Point, head: number): void {
 }
 
 function onPointerDown(event: PointerEvent): void {
+  syncModifierState(event);
   const view = getCanvasView();
   const screenPoint = eventToCanvasPoint(event);
   if (!pointInViewport(screenPoint, view.viewport)) {
+    state.hoverPoint = null;
+    updateCanvasCursor();
     return;
   }
   const point = clampPoint(screenToWorld(screenPoint, view));
+  state.hoverPoint = point;
   state.lastPointerType = event.pointerType || 'mouse';
 
   canvas.setPointerCapture(event.pointerId);
@@ -984,12 +900,14 @@ function onPointerDown(event: PointerEvent): void {
     };
     updateGuidanceUI();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
   if (state.tool === 'select') {
     startSelectionDrag(point, event);
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -998,6 +916,7 @@ function onPointerDown(event: PointerEvent): void {
     updateStandpipeReading();
     updateGuidanceUI();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -1005,6 +924,7 @@ function onPointerDown(event: PointerEvent): void {
     state.drag = { type: 'polygon-draw', start: point, current: point };
     updateGuidanceUI();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -1014,6 +934,7 @@ function onPointerDown(event: PointerEvent): void {
       state.previewPoint = point;
       updateGuidanceUI();
       render();
+      updateCanvasCursor(point);
       return;
     }
 
@@ -1025,6 +946,7 @@ function onPointerDown(event: PointerEvent): void {
 
     if (distance(start, end) < 0.02 * Math.min(state.domain.width, state.domain.height)) {
       render();
+      updateCanvasCursor(point);
       return;
     }
 
@@ -1040,6 +962,7 @@ function onPointerDown(event: PointerEvent): void {
     const mapped = kindMap[state.tool];
     if (!mapped) {
       render();
+      updateCanvasCursor(point);
       return;
     }
 
@@ -1048,11 +971,13 @@ function onPointerDown(event: PointerEvent): void {
     state.selected = { kind: 'line', id: state.nextId - 1 };
     updateSelectionPanel();
     scheduleSolve();
+    updateCanvasCursor(point);
     return;
   }
 }
 
 function onPointerMove(event: PointerEvent): void {
+  syncModifierState(event);
   const view = getCanvasView();
   const screenPoint = eventToCanvasPoint(event);
   state.lastPointerType = event.pointerType || state.lastPointerType;
@@ -1066,16 +991,22 @@ function onPointerMove(event: PointerEvent): void {
       x: state.drag.startCenter.x - dxPx * worldPerPxX,
       y: state.drag.startCenter.y + dyPx * worldPerPxY,
     });
+    state.hoverPoint = clampPoint(screenToWorld(screenPoint, view));
     updateGuidanceUI();
     render();
+    updateCanvasCursor(state.hoverPoint);
     return;
   }
 
   if (!pointInViewport(screenPoint, view.viewport)) {
+    state.hoverPoint = null;
+    updateCanvasCursor();
     return;
   }
   const point = clampPoint(screenToWorld(screenPoint, view));
+  state.hoverPoint = point;
   state.lastPointerType = event.pointerType || state.lastPointerType;
+  updateCanvasCursor(point);
 
   if (state.pendingLineStart) {
     state.previewPoint = point;
@@ -1090,6 +1021,7 @@ function onPointerMove(event: PointerEvent): void {
     line[drag.endpoint] = clampPoint(point);
     scheduleSolve();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -1114,6 +1046,7 @@ function onPointerMove(event: PointerEvent): void {
     line.p2 = { x: drag.startP2.x + dx, y: drag.startP2.y + dy };
     scheduleSolve();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -1136,6 +1069,7 @@ function onPointerMove(event: PointerEvent): void {
     }));
     scheduleSolve();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
@@ -1148,24 +1082,29 @@ function onPointerMove(event: PointerEvent): void {
     polygon.vertices[drag.vertexIndex] = clampPoint(point);
     scheduleSolve();
     render();
+    updateCanvasCursor(point);
     return;
   }
 
   if (state.drag.type === 'polygon-draw') {
     state.drag.current = point;
     render();
+    updateCanvasCursor(point);
     return;
   }
 
   render();
+  updateCanvasCursor(point);
 }
 
 function onPointerUp(event: PointerEvent): void {
+  syncModifierState(event);
   const view = getCanvasView();
   const screenPoint = eventToCanvasPoint(event);
   const point = pointInViewport(screenPoint, view.viewport)
     ? clampPoint(screenToWorld(screenPoint, view))
     : null;
+  state.hoverPoint = point;
 
   if (point && state.drag.type === 'polygon-draw') {
     const polygon = createPolygonFromDrag(state.drag.start, state.drag.current);
@@ -1182,14 +1121,70 @@ function onPointerUp(event: PointerEvent): void {
   state.drag = { type: 'none' };
   updateGuidanceUI();
   render();
+  updateCanvasCursor(point);
 }
 
 function onPointerLeave(): void {
   if (state.drag.type === 'polygon-draw') {
     return;
   }
+  state.hoverPoint = null;
   state.previewPoint = null;
   render();
+  updateCanvasCursor();
+}
+
+function onWindowDragEnter(event: DragEvent): void {
+  if (!dragEventHasFiles(event)) {
+    return;
+  }
+  event.preventDefault();
+  fileDragDepth += 1;
+  canvasWrap.classList.add('is-file-drag');
+}
+
+function onWindowDragOver(event: DragEvent): void {
+  if (!dragEventHasFiles(event)) {
+    return;
+  }
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+  canvasWrap.classList.add('is-file-drag');
+}
+
+function onWindowDragLeave(event: DragEvent): void {
+  if (!dragEventHasFiles(event)) {
+    return;
+  }
+  event.preventDefault();
+  fileDragDepth = Math.max(0, fileDragDepth - 1);
+  if (fileDragDepth === 0) {
+    canvasWrap.classList.remove('is-file-drag');
+  }
+}
+
+async function onWindowDrop(event: DragEvent): Promise<void> {
+  if (!dragEventHasFiles(event)) {
+    return;
+  }
+  event.preventDefault();
+  fileDragDepth = 0;
+  canvasWrap.classList.remove('is-file-drag');
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) {
+    return;
+  }
+  await importStateFromFile(file);
+}
+
+function dragEventHasFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) {
+    return false;
+  }
+  return Array.from(types).includes('Files');
 }
 
 function createPolygonFromDrag(start: Point, end: Point): NoFlowPolygon | null {
@@ -1383,6 +1378,54 @@ function findLine(point: Point): LineBoundary | null {
   return null;
 }
 
+function syncModifierState(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean }): void {
+  state.modifiers.alt = event.altKey;
+  state.modifiers.ctrl = event.ctrlKey;
+  state.modifiers.meta = event.metaKey;
+}
+
+function updateCanvasCursor(point = state.hoverPoint): void {
+  let cursor = 'default';
+  let mode = 'default';
+  const hasPoint = point !== null;
+
+  if (state.camera.panMode) {
+    cursor = state.drag.type === 'pan' ? 'grabbing' : 'grab';
+    mode = state.drag.type === 'pan' ? 'pan-drag' : 'pan';
+  } else if (state.tool === 'select') {
+    if (
+      state.drag.type === 'line-end' ||
+      state.drag.type === 'line-move' ||
+      state.drag.type === 'polygon-move' ||
+      state.drag.type === 'polygon-vertex'
+    ) {
+      cursor = 'grabbing';
+      mode = 'dragging';
+    } else if (hasPoint && (state.modifiers.ctrl || state.modifiers.meta) && findPolygonVertex(point)) {
+      cursor = CURSOR_MINUS;
+      mode = 'minus';
+    } else if (hasPoint && state.modifiers.alt && findPolygonEdge(point)) {
+      cursor = CURSOR_PLUS;
+      mode = 'plus';
+    } else if (hasPoint && (findPolygonVertex(point) || findLineEndpoint(point))) {
+      cursor = 'grab';
+      mode = 'handle';
+    } else if (hasPoint && (findPolygon(point) || findLine(point))) {
+      cursor = 'move';
+      mode = 'move';
+    }
+  } else if (state.tool === 'standpipe') {
+    cursor = 'crosshair';
+    mode = 'standpipe';
+  } else {
+    cursor = 'crosshair';
+    mode = 'draw';
+  }
+
+  canvas.style.cursor = cursor;
+  canvas.dataset.cursorMode = mode;
+}
+
 function pointerWorldThreshold(): number {
   const view = getCanvasView();
   const worldPerPxX = view.bounds.width / view.viewport.width;
@@ -1504,12 +1547,7 @@ function updateGuidanceUI(): void {
     stepText = 'Step 1 of 1: click inside active soil to place a standpipe.';
   }
 
-  const bounds = getViewBounds();
   toolStep.textContent = stepText;
-  canvasPrompt.textContent =
-    `${stepText} | View x:${bounds.xMin.toFixed(1)}-${(bounds.xMin + bounds.width).toFixed(1)}m ` +
-    `y:${bounds.yMin.toFixed(1)}-${(bounds.yMin + bounds.height).toFixed(1)}m | ` +
-    `${state.lineBoundaries.length} line BCs, ${state.polygons.length} no-flow polygons.`;
   zoomLabel.textContent = `${Math.round(state.camera.zoom * 100)}%`;
   panModeBtn.textContent = state.camera.panMode ? 'Pan: On' : 'Pan: Off';
   panModeBtn.classList.toggle('is-active', state.camera.panMode);
@@ -2284,23 +2322,26 @@ function render(): void {
   ctx.restore();
 
   drawDomainOutline(view);
-  drawOverlayLegend(view);
+  drawSelectionHandles(view);
 }
 
 function drawDomainOutline(view: CanvasView): void {
   const { viewport, bounds } = view;
+  const displayBounds = mapBoundsToDisplay(bounds);
+  const xSuffix = transformedCoordinatesActive() ? " x'" : ' m';
+  const ySuffix = transformedCoordinatesActive() ? " y'" : ' m';
   ctx.strokeStyle = '#213547';
   ctx.lineWidth = 2;
   ctx.strokeRect(viewport.left, viewport.top, viewport.width, viewport.height);
 
   ctx.fillStyle = '#102332';
   ctx.font = '12px "Trebuchet MS", "Gill Sans", sans-serif';
-  const xMin = bounds.xMin.toFixed(1);
-  const xMax = (bounds.xMin + bounds.width).toFixed(1);
-  const yMax = (bounds.yMin + bounds.height).toFixed(1);
+  const xMin = displayBounds.xMin.toFixed(1);
+  const xMax = (displayBounds.xMin + displayBounds.width).toFixed(1);
+  const yMax = (displayBounds.yMin + displayBounds.height).toFixed(1);
   ctx.fillText(xMin, viewport.left - 10, viewport.top + viewport.height + 14);
-  ctx.fillText(`${xMax} m`, viewport.left + viewport.width - 38, viewport.top + viewport.height + 14);
-  ctx.fillText(`${yMax} m`, viewport.left - 34, viewport.top + 10);
+  ctx.fillText(`${xMax}${xSuffix}`, viewport.left + viewport.width - 54, viewport.top + viewport.height + 14);
+  ctx.fillText(`${yMax}${ySuffix}`, viewport.left - 40, viewport.top + 10);
 }
 
 function drawHeadShading(view: CanvasView, solution: Solution): void {
@@ -2533,17 +2574,6 @@ function drawSelection(view: CanvasView): void {
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
     ctx.setLineDash([]);
-
-    const handleRadius = state.coarsePointer || state.lastPointerType === 'touch' ? 8 : 5;
-    [a, b].forEach((handle) => {
-      ctx.fillStyle = '#f59e0b';
-      ctx.beginPath();
-      ctx.arc(handle.x, handle.y, handleRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    });
     return;
   }
 
@@ -2565,9 +2595,15 @@ function drawSelection(view: CanvasView): void {
   ctx.closePath();
   ctx.stroke();
   ctx.setLineDash([]);
+}
+
+function drawSelectionHandles(view: CanvasView): void {
+  if (!state.selected) {
+    return;
+  }
 
   const handleRadius = state.coarsePointer || state.lastPointerType === 'touch' ? 8 : 5;
-  screenVertices.forEach((handle) => {
+  const drawHandle = (handle: Point): void => {
     ctx.fillStyle = '#f59e0b';
     ctx.beginPath();
     ctx.arc(handle.x, handle.y, handleRadius, 0, Math.PI * 2);
@@ -2575,30 +2611,66 @@ function drawSelection(view: CanvasView): void {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;
     ctx.stroke();
+  };
+
+  if (state.selected.kind === 'line') {
+    const line = state.lineBoundaries.find((item) => item.id === state.selected?.id);
+    if (!line) {
+      return;
+    }
+    drawHandle(worldToScreen(line.p1, view));
+    drawHandle(worldToScreen(line.p2, view));
+    return;
+  }
+
+  const polygon = state.polygons.find((item) => item.id === state.selected?.id);
+  if (!polygon || polygon.vertices.length < 3) {
+    return;
+  }
+  polygon.vertices.map((vertex) => worldToScreen(vertex, view)).forEach((handle) => {
+    drawHandle(handle);
   });
 }
 
-function drawOverlayLegend(view: CanvasView): void {
-  const { viewport } = view;
-  const boxWidth = clamp(0.46 * viewport.width, 180, 340);
-  const boxHeight = 62;
-  const x = viewport.left + 8;
-  const y = viewport.top + 8;
+function transformedCoordinatesActive(): boolean {
+  return state.view.coordinateMode === 'transformed' && Math.abs(state.solver.kx - state.solver.ky) > 1e-9;
+}
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
-  ctx.fillRect(x, y, boxWidth, boxHeight);
-  ctx.strokeStyle = 'rgba(15, 23, 42, 0.25)';
-  ctx.strokeRect(x, y, boxWidth, boxHeight);
+function displayCoordinateScale(): Point {
+  if (!transformedCoordinatesActive()) {
+    return { x: 1, y: 1 };
+  }
+  const sx = Math.sqrt(state.solver.ky / state.solver.kx);
+  if (!Number.isFinite(sx) || sx <= 0) {
+    return { x: 1, y: 1 };
+  }
+  return { x: sx, y: 1 };
+}
 
-  ctx.fillStyle = '#0f172a';
-  ctx.font = '11px "Trebuchet MS", "Gill Sans", sans-serif';
-  ctx.fillText('Contours: equal head spacing', x + 8, y + 19);
-  ctx.fillText('Flow lines: traced from Darcy flux', x + 8, y + 34);
+function mapPointToDisplay(point: Point): Point {
+  const scale = displayCoordinateScale();
+  return {
+    x: point.x * scale.x,
+    y: point.y * scale.y,
+  };
+}
 
-  const relation = Math.abs(state.solver.kx - state.solver.ky) < 1e-6
-    ? 'Kx = Ky: EP + flow lines should be near orthogonal.'
-    : 'Kx != Ky: orthogonality can diverge (anisotropic behavior).';
-  ctx.fillText(relation, x + 8, y + 50);
+function mapPointFromDisplay(point: Point): Point {
+  const scale = displayCoordinateScale();
+  return {
+    x: point.x / scale.x,
+    y: point.y / scale.y,
+  };
+}
+
+function mapBoundsToDisplay(bounds: ViewBounds): ViewBounds {
+  const scale = displayCoordinateScale();
+  return {
+    xMin: bounds.xMin * scale.x,
+    yMin: bounds.yMin * scale.y,
+    width: bounds.width * scale.x,
+    height: bounds.height * scale.y,
+  };
 }
 
 function getViewport(): Viewport {
@@ -2606,7 +2678,8 @@ function getViewport(): Viewport {
   const pad = 14;
   const maxW = Math.max(10, rect.width - 2 * pad);
   const maxH = Math.max(10, rect.height - 2 * pad);
-  const domainAspect = state.domain.width / state.domain.height;
+  const displayDomain = mapPointToDisplay({ x: state.domain.width, y: state.domain.height });
+  const domainAspect = displayDomain.x / Math.max(displayDomain.y, 1e-9);
   const screenAspect = maxW / maxH;
 
   let width = maxW;
@@ -2658,18 +2731,26 @@ function resolveView(viewOrViewport: CanvasView | Viewport): CanvasView {
 
 function worldToScreen(point: Point, viewOrViewport: CanvasView | Viewport): Point {
   const view = resolveView(viewOrViewport);
+  const displayBounds = mapBoundsToDisplay(view.bounds);
+  const displayPoint = mapPointToDisplay(point);
   return {
-    x: view.viewport.left + ((point.x - view.bounds.xMin) / view.bounds.width) * view.viewport.width,
-    y: view.viewport.top + (1 - (point.y - view.bounds.yMin) / view.bounds.height) * view.viewport.height,
+    x:
+      view.viewport.left +
+      ((displayPoint.x - displayBounds.xMin) / Math.max(displayBounds.width, 1e-9)) * view.viewport.width,
+    y:
+      view.viewport.top +
+      (1 - (displayPoint.y - displayBounds.yMin) / Math.max(displayBounds.height, 1e-9)) * view.viewport.height,
   };
 }
 
 function screenToWorld(point: Point, viewOrViewport: CanvasView | Viewport): Point {
   const view = resolveView(viewOrViewport);
-  return {
-    x: view.bounds.xMin + ((point.x - view.viewport.left) / view.viewport.width) * view.bounds.width,
-    y: view.bounds.yMin + (1 - (point.y - view.viewport.top) / view.viewport.height) * view.bounds.height,
+  const displayBounds = mapBoundsToDisplay(view.bounds);
+  const displayPoint = {
+    x: displayBounds.xMin + ((point.x - view.viewport.left) / view.viewport.width) * displayBounds.width,
+    y: displayBounds.yMin + (1 - (point.y - view.viewport.top) / view.viewport.height) * displayBounds.height,
   };
+  return mapPointFromDisplay(displayPoint);
 }
 
 function headColor(head: number, minHead: number, maxHead: number): string {
@@ -2685,6 +2766,254 @@ function exportCanvasPng(): void {
   link.download = `flownet-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
+}
+
+function exportStateJson(): void {
+  const snapshot: PersistedFlowNetStateV1 = {
+    schema: 'flownet2-state',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    domain: { ...state.domain },
+    solver: { ...state.solver },
+    view: { ...state.view },
+    newHead: readNumber(newHeadInput, 8, -200, 200),
+    lineBoundaries: state.lineBoundaries.map((line) => ({
+      id: line.id,
+      kind: line.kind,
+      p1: { ...line.p1 },
+      p2: { ...line.p2 },
+      head: line.head,
+    })),
+    polygons: state.polygons.map((polygon) => ({
+      id: polygon.id,
+      vertices: polygon.vertices.map((vertex) => ({ ...vertex })),
+    })),
+    standpipePoint: state.standpipePoint ? { ...state.standpipePoint } : null,
+  };
+
+  const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.download = `flownet-state-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  link.href = URL.createObjectURL(blob);
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function importStateFromFile(file: File): Promise<void> {
+  try {
+    const text = await file.text();
+    const parsed = parsePersistedState(JSON.parse(text));
+    applyPersistedState(parsed, file.name);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown parse error';
+    statusText.textContent = `Load failed: ${message}`;
+  }
+}
+
+function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
+  const root = asRecord(raw, 'State file');
+  const version = readInteger(root.version, 'version', 1, 1_000);
+  const schema = root.schema;
+  if (schema !== 'flownet2-state') {
+    throw new Error('Unsupported file schema.');
+  }
+  if (version !== 1) {
+    throw new Error(`Unsupported state version: ${version}.`);
+  }
+
+  const domainRecord = asRecord(root.domain, 'domain');
+  const solverRecord = asRecord(root.solver, 'solver');
+  const viewRecord = asRecord(root.view, 'view');
+
+  const domain: DomainSettings = {
+    width: readNumberValue(domainRecord.width, 'domain.width', 5, 120),
+    height: readNumberValue(domainRecord.height, 'domain.height', 3, 60),
+  };
+
+  const solver: SolverSettings = {
+    nx: toOddInteger(readInteger(solverRecord.nx, 'solver.nx', 11, 201)),
+    ny: toOddInteger(readInteger(solverRecord.ny, 'solver.ny', 11, 201)),
+    kx: readNumberValue(solverRecord.kx, 'solver.kx', 0.01, 1000),
+    ky: readNumberValue(solverRecord.ky, 'solver.ky', 0.01, 1000),
+    maxIter: readInteger(solverRecord.maxIter, 'solver.maxIter', 200, 50000),
+    tolerance: readNumberValue(solverRecord.tolerance, 'solver.tolerance', 1e-7, 0.1),
+    omega: readNumberValue(solverRecord.omega, 'solver.omega', 1, 1.95),
+  };
+
+  const coordinateModeRaw = viewRecord.coordinateMode;
+  const coordinateMode: CoordinateMode =
+    coordinateModeRaw === 'transformed' || coordinateModeRaw === 'real' ? coordinateModeRaw : 'real';
+  const view: ViewSettings = {
+    contours: readInteger(viewRecord.contours, 'view.contours', 3, 30),
+    streamlines: readInteger(viewRecord.streamlines, 'view.streamlines', 4, 36),
+    autoSolve: readBoolean(viewRecord.autoSolve, 'view.autoSolve'),
+    coordinateMode,
+  };
+
+  const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
+  const lineBoundaries = readLineBoundaries(root.lineBoundaries);
+  const polygons = readPolygons(root.polygons);
+  const standpipePoint = readOptionalPoint(root.standpipePoint, 'standpipePoint');
+
+  return {
+    schema: 'flownet2-state',
+    version: 1,
+    savedAt: typeof root.savedAt === 'string' ? root.savedAt : new Date().toISOString(),
+    domain,
+    solver,
+    view,
+    newHead,
+    lineBoundaries,
+    polygons,
+    standpipePoint,
+  };
+}
+
+function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string): void {
+  state.domain = { ...imported.domain };
+  state.solver = { ...imported.solver };
+  state.view = { ...imported.view };
+  state.pendingLineStart = null;
+  state.previewPoint = null;
+  state.selected = null;
+  state.drag = { type: 'none' };
+  state.solution = null;
+  state.standpipeReading = null;
+  state.standpipePoint = imported.standpipePoint ? clampPoint(imported.standpipePoint) : null;
+  state.camera.zoom = 1;
+  state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
+  state.camera.panMode = false;
+
+  state.lineBoundaries = imported.lineBoundaries.map((line) => ({
+    id: line.id,
+    kind: line.kind,
+    p1: clampPoint(line.p1),
+    p2: clampPoint(line.p2),
+    head: line.head,
+  }));
+  state.polygons = imported.polygons.map((polygon) => ({
+    id: polygon.id,
+    vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
+  }));
+
+  const maxBoundaryId = state.lineBoundaries.reduce((maxId, line) => Math.max(maxId, line.id), 0);
+  const maxPolygonId = state.polygons.reduce((maxId, polygon) => Math.max(maxId, polygon.id), 0);
+  state.nextId = Math.max(maxBoundaryId, maxPolygonId) + 1;
+
+  domainWidthInput.value = String(state.domain.width);
+  domainHeightInput.value = String(state.domain.height);
+  gridNxInput.value = String(state.solver.nx);
+  gridNyInput.value = String(state.solver.ny);
+  kxInput.value = String(state.solver.kx);
+  kyInput.value = String(state.solver.ky);
+  maxIterInput.value = String(state.solver.maxIter);
+  toleranceInput.value = String(state.solver.tolerance);
+  omegaInput.value = String(state.solver.omega);
+  contoursInput.value = String(state.view.contours);
+  streamlinesInput.value = String(state.view.streamlines);
+  coordModeSelect.value = state.view.coordinateMode;
+  autoSolveInput.checked = state.view.autoSolve;
+  newHeadInput.value = String(imported.newHead);
+
+  clearExampleInUrl();
+  exampleSummary.textContent = `Loaded from file: ${fileName}`;
+
+  setTool('select');
+  updateSelectionPanel();
+  solveAndRender();
+}
+
+function clearExampleInUrl(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('example')) {
+    return;
+  }
+  url.searchParams.delete('example');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function readLineBoundaries(value: unknown): LineBoundary[] {
+  if (!Array.isArray(value)) {
+    throw new Error('lineBoundaries must be an array.');
+  }
+  return value.map((entry, index) => {
+    const record = asRecord(entry, `lineBoundaries[${index}]`);
+    const kind = readLineKind(record.kind, `lineBoundaries[${index}].kind`);
+    const p1 = readPoint(record.p1, `lineBoundaries[${index}].p1`);
+    const p2 = readPoint(record.p2, `lineBoundaries[${index}].p2`);
+    const id = readInteger(record.id, `lineBoundaries[${index}].id`, 1, 1_000_000);
+    const head = kind === 'equipotential'
+      ? readNumberValue(record.head, `lineBoundaries[${index}].head`, -200, 200)
+      : 0;
+    return { id, kind, p1, p2, head };
+  });
+}
+
+function readPolygons(value: unknown): NoFlowPolygon[] {
+  if (!Array.isArray(value)) {
+    throw new Error('polygons must be an array.');
+  }
+  return value.map((entry, index) => {
+    const record = asRecord(entry, `polygons[${index}]`);
+    const id = readInteger(record.id, `polygons[${index}].id`, 1, 1_000_000);
+    if (!Array.isArray(record.vertices) || record.vertices.length < 3) {
+      throw new Error(`polygons[${index}].vertices must contain at least 3 points.`);
+    }
+    const vertices = record.vertices.map((vertex, vertexIndex) =>
+      readPoint(vertex, `polygons[${index}].vertices[${vertexIndex}]`),
+    );
+    return { id, vertices };
+  });
+}
+
+function readOptionalPoint(value: unknown, label: string): Point | null {
+  if (value === null || typeof value === 'undefined') {
+    return null;
+  }
+  return readPoint(value, label);
+}
+
+function readPoint(value: unknown, label: string): Point {
+  const record = asRecord(value, label);
+  return {
+    x: readNumberValue(record.x, `${label}.x`, -1e6, 1e6),
+    y: readNumberValue(record.y, `${label}.y`, -1e6, 1e6),
+  };
+}
+
+function readLineKind(value: unknown, label: string): LineKind {
+  if (value === 'equipotential' || value === 'phreatic' || value === 'noflow') {
+    return value;
+  }
+  throw new Error(`${label} must be equipotential, phreatic, or noflow.`);
+}
+
+function readBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${label} must be true/false.`);
+  }
+  return value;
+}
+
+function readInteger(value: unknown, label: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a number.`);
+  }
+  return clamp(Math.round(value), min, max);
+}
+
+function readNumberValue(value: unknown, label: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number.`);
+  }
+  return clamp(value, min, max);
+}
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
 }
 
 function projectPointToSegment(point: Point, a: Point, b: Point): Point {
@@ -2703,6 +3032,16 @@ function projectPointToSegment(point: Point, a: Point, b: Point): Point {
 function distancePointToSegment(point: Point, a: Point, b: Point): number {
   const projection = projectPointToSegment(point, a, b);
   return distance(point, projection);
+}
+
+function buildModifierCursor(kind: 'plus' | 'minus'): string {
+  const markPath = kind === 'plus' ? 'M12 7v10M7 12h10' : 'M7 12h10';
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">` +
+    `<circle cx="12" cy="12" r="8.4" fill="white" fill-opacity="0.9" stroke="#1e293b" stroke-width="1.2"/>` +
+    `<path d="${markPath}" stroke="#0f766e" stroke-width="1.8" stroke-linecap="round"/>` +
+    `</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, crosshair`;
 }
 
 function pointInPolygon(point: Point, vertices: Point[]): boolean {

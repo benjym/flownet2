@@ -194,7 +194,6 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.goto('/');
 
     await page.selectOption('#exampleSelect', 'drain');
-    await page.getByRole('button', { name: 'Load example' }).click();
 
     await expect(page.locator('#domainWidth')).toHaveValue('32');
     await expect(page.locator('#kx')).toHaveValue('1');
@@ -242,5 +241,117 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.click(rightX, topY);
     await page.keyboard.up('Control');
     await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
+  });
+
+  test('select cursor shows plus/minus modes for polygon add/remove shortcuts', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+    const start = point(0.4, 0.55);
+    const end = point(0.6, 0.7);
+    const topY = Math.min(start.y, end.y);
+    const rightX = Math.max(start.x, end.x);
+    const midTopX = 0.5 * (start.x + end.x);
+
+    await page.getByRole('button', { name: 'No-flow polygon' }).click();
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y);
+    await page.mouse.up();
+
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.mouse.move(midTopX, topY);
+
+    await page.keyboard.down('Alt');
+    await expect.poll(async () =>
+      page.locator('#flowCanvas').evaluate((el) => el.getAttribute('data-cursor-mode')),
+    ).toBe('plus');
+    await page.keyboard.up('Alt');
+
+    await page.mouse.move(rightX, topY);
+    await page.keyboard.down('Control');
+    await expect.poll(async () =>
+      page.locator('#flowCanvas').evaluate((el) => el.getAttribute('data-cursor-mode')),
+    ).toBe('minus');
+    await page.keyboard.up('Control');
+  });
+
+  test('anisotropic transformed-coordinate toggle changes displayed x-extent', async ({ page }) => {
+    await page.goto('/?example=anisotropic-demo');
+
+    await expect(page.locator('#statusText')).toContainText('anisotropic');
+    await expect(page.locator('#coordMode')).toHaveValue('real');
+
+    const promptReal = (await page.locator('#canvasPrompt').innerText()).trim();
+    const [realMin, realMax] = parseXRange(promptReal);
+    expect(realMin).toBeCloseTo(0, 1);
+    expect(realMax).toBeCloseTo(30, 1);
+
+    await page.selectOption('#coordMode', 'transformed');
+    await expect(page.locator('#coordMode')).toHaveValue('transformed');
+    await expect(page.locator('#canvasPrompt')).toContainText("coords: transformed");
+
+    const promptTransformed = (await page.locator('#canvasPrompt').innerText()).trim();
+    const [transformedMin, transformedMax] = parseXRange(promptTransformed);
+    expect(transformedMin).toBeCloseTo(0, 1);
+    expect(transformedMax).toBeCloseTo(15, 1);
+  });
+
+  test('student can load a saved state JSON file', async ({ page }) => {
+    await page.goto('/');
+
+    const savedState = {
+      schema: 'flownet2-state',
+      version: 1,
+      savedAt: new Date().toISOString(),
+      domain: { width: 44, height: 14 },
+      solver: { nx: 101, ny: 51, kx: 2, ky: 1, maxIter: 5000, tolerance: 0.0001, omega: 1.6 },
+      view: { contours: 12, streamlines: 10, autoSolve: true, coordinateMode: 'real' },
+      newHead: 11,
+      lineBoundaries: [
+        {
+          id: 1,
+          kind: 'equipotential',
+          p1: { x: 0, y: 0 },
+          p2: { x: 0, y: 14 },
+          head: 11,
+        },
+      ],
+      polygons: [
+        {
+          id: 2,
+          vertices: [
+            { x: 17, y: 2 },
+            { x: 24, y: 2 },
+            { x: 22, y: 7 },
+            { x: 16, y: 6 },
+          ],
+        },
+      ],
+      standpipePoint: { x: 30, y: 6 },
+    };
+
+    await page.setInputFiles('#loadStateInput', {
+      name: 'saved-state.flownet2.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(savedState)),
+    });
+
+    await expect(page.locator('#domainWidth')).toHaveValue('44');
+    await expect(page.locator('#domainHeight')).toHaveValue('14');
+    await expect(page.locator('#inventorySummary')).toContainText('1 line BCs + 1 no-flow polygons');
+    await expect(page.locator('#newHead')).toHaveValue('11');
+    await expect(page.locator('#exampleSummary')).toContainText('Loaded from file');
+    await expect(page.locator('#statusText')).toContainText('Solved');
   });
 });

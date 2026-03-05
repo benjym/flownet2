@@ -1,13 +1,139 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>flownet2</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flownet2</title>
+</head>
+
+<body>
+  <div id="app">
+    <div class="layout">
+      <aside class="panel">
+        <h1>Flow Net Studio</h1>
+        <p class="subhead">2D anisotropic groundwater flow for first-time undergrad soil mechanics.</p>
+
+        <section class="group">
+          <h2>Quick Start</h2>
+          <ol class="quick-start">
+            <li>Use default EP boundaries or draw your own BCs.</li>
+            <li>Press <strong>Solve now</strong> (or keep Auto-solve on).</li>
+            <li>Switch to <strong>Standpipe</strong> and click to read water rise.</li>
+          </ol>
+        </section>
+
+        <section class="group">
+          <h2>Examples</h2>
+          <label>Preset case
+            <select id="exampleSelect"></select>
+          </label>
+          <p id="exampleSummary" class="hint"></p>
+        </section>
+
+        <section class="group">
+          <h2>Domain + Material</h2>
+          <div class="grid two-col">
+            <label>Width (m)<input id="domainWidth" type="number" min="5" step="1" value="30"></label>
+            <label>Height (m)<input id="domainHeight" type="number" min="3" step="1" value="12"></label>
+            <label>Grid Nx<input id="gridNx" type="number" min="11" max="201" step="2" value="81"></label>
+            <label>Grid Ny<input id="gridNy" type="number" min="11" max="201" step="2" value="41"></label>
+            <label>Kx<input id="kx" type="number" min="0.01" step="0.1" value="1"></label>
+            <label>Ky<input id="ky" type="number" min="0.01" step="0.1" value="1"></label>
+          </div>
+        </section>
+
+        <section class="group">
+          <h2>Drawing Tools</h2>
+          <div class="tool-row" id="toolRow">
+            <button data-tool="select" class="is-active">Select</button>
+            <button data-tool="equipotential">EP line</button>
+            <button data-tool="phreatic">Phreatic</button>
+            <button data-tool="noflow-line">No-flow line</button>
+            <button data-tool="noflow-zone">No-flow polygon</button>
+            <button data-tool="standpipe">Standpipe</button>
+          </div>
+          <label>New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
+          <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
+          <p id="toolStep" class="hint step-hint"></p>
+        </section>
+
+        <section class="group">
+          <h2>Solver + Display</h2>
+          <div class="grid two-col">
+            <label>Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
+            <label>Tolerance<input id="tolerance" type="number" min="0.000001" step="0.00001" value="0.0001"></label>
+            <label>SOR omega<input id="omega" type="number" min="1" max="1.95" step="0.05" value="1.6"></label>
+            <label>Contours<input id="contours" type="number" min="3" max="30" step="1" value="14"></label>
+            <label>Flow lines<input id="streamlines" type="number" min="4" max="36" step="1" value="12"></label>
+            <label>Coordinates
+              <select id="coordMode">
+                <option value="real">Real (x, y)</option>
+                <option value="transformed">Transformed (x', y')</option>
+              </select>
+            </label>
+            <label class="inline-check"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
+          </div>
+          <div class="action-row">
+            <button id="solveBtn">Solve now</button>
+            <button id="exportBtn">Take Screenshot</button>
+            <button id="saveStateBtn">Save state</button>
+            <button id="loadStateBtn">Load file</button>
+            <button id="deleteBtn" class="danger">Delete selected</button>
+          </div>
+          <input id="loadStateInput" type="file" accept=".json,.flownet2,application/json" hidden>
+          <p id="statusText" class="status">Waiting for first solve.</p>
+        </section>
+
+        <section class="group" id="selectionBlock">
+          <h2>Selected Item</h2>
+          <p id="selectionType">Nothing selected.</p>
+          <label id="selectedHeadRow" class="is-hidden">EP head (m)<input id="selectedHead" type="number" step="0.1" value="8"></label>
+        </section>
+
+        <section class="group">
+          <h2>Boundary List</h2>
+          <p id="inventorySummary" class="inventory-summary"></p>
+          <div id="inventoryList" class="inventory-list"></div>
+        </section>
+
+        <section class="group">
+          <h2>Standpipe</h2>
+          <p id="standpipeText">Choose the standpipe tool and click inside the domain.</p>
+        </section>
+
+        <section class="group">
+          <h2>Guide</h2>
+          <ul>
+            <li>Default outer boundary is no-flow unless you draw EP/phreatic lines.</li>
+            <li>EP lines impose fixed hydraulic head.</li>
+            <li>Phreatic line is a user-drawn fixed head equal to elevation.</li>
+            <li>No-flow lines and no-flow polygons act as impermeable boundaries.</li>
+            <li>Canvas controls: <strong>+</strong>/<strong>-</strong> zoom, <strong>Pan</strong> drag, <strong>Fit</strong> reset view.</li>
+            <li>Keyboard: <strong>Esc</strong> cancels drawing, <strong>Delete</strong> removes selected item.</li>
+            <li>Polygon edit shortcuts in Select: <strong>Alt</strong>+edge click adds vertex, <strong>Ctrl/Cmd</strong>+vertex click deletes.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="canvas-wrap" id="canvasWrap">
+        <div class="canvas-toolbar">
+          <p id="canvasPrompt">Select a tool, draw boundaries, then solve and probe with the standpipe.</p>
+          <div class="view-controls">
+            <button id="zoomOutBtn" type="button" aria-label="Zoom out">-</button>
+            <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>
+            <button id="fitViewBtn" type="button">Fit</button>
+            <button id="panModeBtn" type="button">Pan: Off</button>
+            <span id="zoomLabel" class="zoom-label">100%</span>
+          </div>
+        </div>
+        <canvas id="flowCanvas"></canvas>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
 </html>
