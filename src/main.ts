@@ -198,7 +198,6 @@ const showHeadMapInput = byId<HTMLInputElement>('showHeadMap');
 const autoSolveInput = byId<HTMLInputElement>('autoSolve');
 const statusText = byId<HTMLParagraphElement>('statusText');
 const standpipeText = byId<HTMLParagraphElement>('standpipeText');
-const selectionType = byId<HTMLParagraphElement>('selectionType');
 const selectedHeadRow = byId<HTMLLabelElement>('selectedHeadRow');
 const selectedHeadInput = byId<HTMLInputElement>('selectedHead');
 const toolHint = byId<HTMLParagraphElement>('toolHint');
@@ -1811,7 +1810,6 @@ function updateBoundaryInventory(): void {
 
 function updateSelectionPanel(): void {
   if (!state.selected) {
-    selectionType.textContent = 'Nothing selected.';
     selectedHeadRow.classList.add('is-hidden');
     deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
@@ -1822,19 +1820,12 @@ function updateSelectionPanel(): void {
   if (state.selected.kind === 'line') {
     const line = state.lineBoundaries.find((item) => item.id === state.selected?.id);
     if (!line) {
-      selectionType.textContent = 'Nothing selected.';
       selectedHeadRow.classList.add('is-hidden');
       deleteBtn.classList.add('is-hidden');
       updateBoundaryInventory();
       updateGuidanceUI();
       return;
     }
-    const label = line.kind === 'equipotential'
-      ? 'Equipotential line'
-      : line.kind === 'phreatic'
-        ? 'Phreatic line'
-        : 'No-flow line';
-    selectionType.textContent = `${label} #${line.id}`;
     if (line.kind === 'equipotential') {
       selectedHeadRow.classList.remove('is-hidden');
       selectedHeadInput.value = String(line.head);
@@ -1849,14 +1840,12 @@ function updateSelectionPanel(): void {
 
   const polygon = state.polygons.find((item) => item.id === state.selected?.id);
   if (!polygon) {
-    selectionType.textContent = 'Nothing selected.';
     selectedHeadRow.classList.add('is-hidden');
     deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
   }
-  selectionType.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
   selectedHeadRow.classList.add('is-hidden');
   deleteBtn.classList.remove('is-hidden');
   updateBoundaryInventory();
