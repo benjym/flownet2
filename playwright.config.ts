@@ -11,7 +11,7 @@ export default defineConfig({
   },
   reporter: [['list']],
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: 'http://127.0.0.1:5180',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -19,8 +19,8 @@ export default defineConfig({
     navigationTimeout: 15_000,
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
+    command: 'npm run dev -- --host 127.0.0.1 --port 5180',
+    url: 'http://127.0.0.1:5180',
     timeout: 60_000,
     reuseExistingServer: true,
   },

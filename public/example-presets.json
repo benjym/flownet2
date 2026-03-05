@@ -254,6 +254,128 @@
     }
   },
   {
+    "id": "coffer-dam",
+    "label": "Coffer Dam",
+    "summary": "Two high-head equipotential boundaries surround a central low-head region.",
+    "domain": {
+      "width": 40,
+      "height": 20
+    },
+    "solver": {
+      "nx": 101,
+      "ny": 51,
+      "kx": 1,
+      "ky": 1,
+      "maxIter": 5000,
+      "tolerance": 0.0001,
+      "omega": 1.6
+    },
+    "view": {
+      "contours": 6,
+      "streamlines": 5,
+      "autoSolve": true,
+      "coordinateMode": "real",
+      "showHeadMap": false
+    },
+    "newHead": 10,
+    "lines": [
+      {
+        "kind": "equipotential",
+        "vertices": [
+          {
+            "x": 0,
+            "y": 20
+          },
+          {
+            "x": 40,
+            "y": 20
+          }
+        ],
+        "head": 20
+      },
+      {
+        "kind": "equipotential",
+        "vertices": [
+          {
+            "x": 18,
+            "y": 16
+          },
+          {
+            "x": 22,
+            "y": 16
+          }
+        ],
+        "head": 16
+      }
+    ],
+    "polygons": [
+      {
+        "vertices": [
+          {
+            "x": 16,
+            "y": 12
+          },
+          {
+            "x": 18,
+            "y": 12
+          },
+          {
+            "x": 18,
+            "y": 20
+          },
+          {
+            "x": 16,
+            "y": 20
+          }
+        ]
+      },
+      {
+        "vertices": [
+          {
+            "x": 22,
+            "y": 12
+          },
+          {
+            "x": 24,
+            "y": 12
+          },
+          {
+            "x": 24,
+            "y": 12
+          },
+          {
+            "x": 24,
+            "y": 20
+          },
+          {
+            "x": 22,
+            "y": 20
+          }
+        ]
+      },
+      {
+        "vertices": [
+          {
+            "x": 18,
+            "y": 16.3
+          },
+          {
+            "x": 22,
+            "y": 16.3
+          },
+          {
+            "x": 22,
+            "y": 20
+          },
+          {
+            "x": 18,
+            "y": 20
+          }
+        ]
+      }
+    ]
+  },
+  {
     "id": "earth-dam",
     "label": "Flow Through Earth Dam",
     "summary": "Upstream reservoir head, downstream tailwater, and a user-drawn phreatic line over a compact impervious cutoff.",

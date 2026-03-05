@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-Open the URL shown in terminal (usually `http://127.0.0.1:5173` or similar).
+Open the URL shown in terminal (usually `http://127.0.0.1:5180` or similar).
 
 ### 3. Build production bundle
 
@@ -65,12 +65,12 @@ When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display 
 ## Precision Controls (Desktop + Mobile)
 
 Canvas toolbar controls:
-- `+` / `-`: zoom in/out
-- `Pan`: toggle drag-to-pan mode
-- `Fit`: reset to full-domain view
+- Mouse wheel / trackpad pinch: zoom in/out
+- Drag empty canvas space in `Select`: pan view
+- Fit-to-screen button: reset to full-domain view
 
 Keyboard shortcuts:
-- `Esc`: cancel in-progress drawing (and exit pan mode)
+- `Esc`: cancel in-progress drawing
 - `Delete` / `Backspace`: remove selected boundary/polygon
 
 ## URL Parameters

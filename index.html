@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/style.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>flownet2</title>
+  <title>Flow Nets</title>
 </head>
 
 <body>
@@ -19,17 +19,17 @@
   <div id="app">
     <div class="layout">
       <aside class="panel">
-        <h1>Flow Net Studio</h1>
-        <p class="subhead">2D anisotropic groundwater flow</p>
+        <h1>Flow Nets</h1>
+        <!-- <p class="subhead">2D anisotropic groundwater flow</p> -->
 
-        <section class="group">
+        <!-- <section class="group">
           <h2>Quick Start</h2>
           <ol class="quick-start">
             <li>Use default boundaries or draw your own.</li>
             <li>Switch to <strong>Standpipe</strong> and click to read water rise.</li>
             <li>Try the Examples below.</li>
           </ol>
-        </section>
+        </section> -->
 
         <section class="group">
           <h2>Examples</h2>
@@ -51,29 +51,28 @@
             <label class="is-hidden" aria-hidden="true">Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
             <label class="is-hidden" aria-hidden="true">Tolerance<input id="tolerance" type="number" min="0.000001" step="0.00001" value="0.0001"></label>
             <label class="is-hidden" aria-hidden="true">SOR omega<input id="omega" type="number" min="1" max="1.95" step="0.05" value="1.6"></label>
-            <label>Equipotentials (interior)<input id="contours" type="number" min="3" max="30" step="1" value="14"></label>
-            <label>Flow lines (interior)<input id="streamlines" type="number" min="4" max="36" step="1" value="12"></label>
+            <label>EPs (interior)<input id="contours" type="number" min="3" max="30" step="1" value="14"></label>
+            <label>FLs (interior)<input id="streamlines" type="number" min="4" max="36" step="1" value="12"></label>
             <label>Coordinates
               <select id="coordMode">
                 <option value="real">Real (x, y)</option>
                 <option value="transformed">Transformed (x', y')</option>
               </select>
             </label>
-            <label class="inline-check"><input id="showHeadMap" type="checkbox">Show head values</label>
             <label class="inline-check is-hidden" aria-hidden="true"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
           </div>
           <div class="action-row">
             <button id="solveBtn" class="is-hidden" aria-hidden="true">Solve now</button>
-            <button id="exportBtn">Download PNG</button>
+            <button id="exportBtn">Save PNG</button>
             <button id="saveStateBtn">Save state</button>
-            <button id="loadStateBtn">Load file</button>
+            <!-- <button id="loadStateBtn">Load file</button> -->
           </div>
           <input id="loadStateInput" type="file" accept=".json,.flownet2,application/json" hidden>
           <p id="statusText" class="status">Waiting for first solve.</p>
         </section>
 
         <section class="group">
-          <h2>Boundary List</h2>
+          <h2>Boundaries</h2>
           <p id="inventorySummary" class="inventory-summary"></p>
           <div id="inventoryList" class="inventory-list"></div>
           <label id="selectedHeadRow" class="is-hidden">EP head (m)<input id="selectedHead" type="number" step="0.1" value="8"></label>
@@ -85,47 +84,97 @@
           <p id="standpipeText">Choose the standpipe tool and click inside the domain.</p>
         </section>
 
-        <section class="group">
-          <h2>Guide</h2>
-          <ul>
-            <li>Default outer boundary is no-flow unless you draw EP/phreatic lines.</li>
-            <li>EP lines impose fixed hydraulic head. Datum is always taken to be the bottom of the domain.</li>
-            <li>Phreatic line is a user-drawn fixed head equal to elevation.</li>
-            <li>No-flow lines and no-flow polygons act as impermeable boundaries.</li>
-            <li>Canvas controls: <strong>+</strong>/<strong>-</strong> zoom, <strong>Pan</strong> drag, <strong>Fit</strong> reset view.</li>
-            <li>Keyboard: <strong>Esc</strong> cancels drawing, <strong>Delete</strong> removes selected item.</li>
-            <li>Line/polygon edit shortcuts in Select: choose an item first, then <strong>Alt</strong>+edge click adds vertex, <strong>Ctrl/Cmd</strong>+vertex click deletes.</li>
-          </ul>
-        </section>
       </aside>
 
       <main class="canvas-wrap" id="canvasWrap">
         <div class="canvas-toolbar">
-          <p id="canvasPrompt">Select a tool, draw boundaries, then solve and probe with the standpipe.</p>
-          <span id="cursorReadout" class="cursor-readout">x: -, y: -</span>
-          <div class="view-controls">
-            <button id="zoomOutBtn" type="button" aria-label="Zoom out">-</button>
-            <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>
-            <button id="fitViewBtn" type="button">Fit</button>
-            <button id="panModeBtn" type="button">Pan: Off</button>
-            <span id="zoomLabel" class="zoom-label">100%</span>
+          <div class="canvas-toolbar-left">
+            <div class="tool-row" id="toolRow">
+              <button data-tool="select" class="is-active">Select</button>
+              <button data-tool="equipotential">EP</button>
+              <button data-tool="noflow-line">FL</button>
+              <button data-tool="phreatic">Phreatic</button>
+              <button data-tool="noflow-zone">Impermeable Area</button>
+              <button data-tool="standpipe">Standpipe</button>
+            </div>
+            <label id="newHeadWrap" class="canvas-ep-head is-hidden">New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
+          </div>
+          <div class="canvas-toolbar-right">
+            <span id="cursorReadout" class="cursor-readout">x: -, y: -</span>
+            <button id="guideToggleBtn" class="guide-toggle-btn" type="button" aria-label="Open instructions" title="Instructions" aria-controls="guideOverlay" aria-expanded="false">?</button>
+            <label class="toolbar-toggle" title="Head values">
+              <input id="showHeadMap" type="checkbox" aria-label="Toggle head values overlay">
+              <span class="toolbar-toggle-label" aria-hidden="true">h</span>
+            </label>
+            <button id="fitViewBtn" class="fit-view-btn" type="button" aria-label="Fit to screen" title="Fit to screen">
+              <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"></path>
+                <path d="M8 3L3 8M12 3l5 5M8 17l-5-5M12 17l5-5"></path>
+              </svg>
+            </button>
           </div>
         </div>
-        <div class="canvas-toolsbar">
-          <div class="tool-row" id="toolRow">
-            <button data-tool="select" class="is-active">Select</button>
-            <button data-tool="equipotential">EP</button>
-            <button data-tool="noflow-line">FL</button>
-            <button data-tool="phreatic">Phreatic</button>
-            <button data-tool="noflow-zone">Impermeable Area</button>
-            <button data-tool="standpipe">Standpipe</button>
-          </div>
-          <label id="newHeadWrap" class="canvas-ep-head is-hidden">New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
+        <div class="canvas-guidance">
           <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
           <p id="toolStep" class="hint step-hint"></p>
         </div>
         <canvas id="flowCanvas"></canvas>
       </main>
+    </div>
+  </div>
+  <div id="guideOverlay" class="guide-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="guideOverlayTitle">
+    <div class="guide-overlay-panel">
+      <div class="guide-overlay-header">
+        <h2 id="guideOverlayTitle">Instructions</h2>
+        <button id="guideCloseBtn" class="guide-close-btn" type="button" aria-label="Close instructions">Close</button>
+      </div>
+      <div class="guide-overlay-content">
+        <section class="guide-section">
+          <h3>Quick Start</h3>
+          <ol>
+            <li>Pick an example or start from the default model.</li>
+            <li>Draw boundaries with EP, FL, Phreatic, and Impermeable Area tools.</li>
+            <li>Switch to Standpipe and click to read head and water rise.</li>
+            <li>Tune Kx, Ky, grid size, and EP/FL interior counts in Settings.</li>
+          </ol>
+        </section>
+        <section class="guide-section">
+          <h3>Tool Meanings</h3>
+          <ul>
+            <li><strong>EP:</strong> fixed hydraulic head line.</li>
+            <li><strong>Phreatic:</strong> fixed head equal to elevation.</li>
+            <li><strong>FL:</strong> impermeable no-flow line.</li>
+            <li><strong>Impermeable Area:</strong> no-flow polygon.</li>
+            <li><strong>Select:</strong> move/edit existing boundaries and polygons.</li>
+          </ul>
+        </section>
+        <section class="guide-section">
+          <h3>View + Editing Controls</h3>
+          <ul>
+            <li>Wheel/pinch to zoom.</li>
+            <li>Drag empty canvas space (in Select) to pan.</li>
+            <li><strong>Fit</strong> resets to full-domain view.</li>
+            <li><strong>h</strong> toggles head-value shading overlay.</li>
+            <li>In Select: <strong>Alt</strong>+edge click adds a vertex, <strong>Ctrl/Cmd</strong>+vertex click removes one.</li>
+            <li><strong>Esc</strong> cancels drawing. <strong>Delete</strong> removes the selected item.</li>
+          </ul>
+        </section>
+        <section class="guide-section">
+          <h3>Save / Load / Export</h3>
+          <ul>
+            <li><strong>Save PNG</strong> exports the current canvas image.</li>
+            <li><strong>Save state</strong> exports model setup (domain, solver, boundaries, view) as JSON.</li>
+            <li><strong>Load state</strong> by dragging a saved JSON or `.flownet2` file onto the app.</li>
+          </ul>
+        </section>
+        <section class="guide-section">
+          <h3>Notes</h3>
+          <ul>
+            <li>Outer boundary is no-flow by default unless overridden by user-drawn EP/phreatic lines.</li>
+            <li>Coordinates mode switches between real <code>(x, y)</code> and transformed <code>(x', y')</code> space.</li>
+          </ul>
+        </section>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

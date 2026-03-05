@@ -41,12 +41,17 @@ test.describe('Flow Net Studio student workflow', () => {
     return [Number(match[1]), Number(match[2])];
   };
 
-  const parseXRange = (text: string): [number, number] => {
-    const match = text.match(/x:([0-9.]+)-([0-9.]+)m/);
+  const parseCursorReadout = (text: string): { xLabel: string; x: number; yLabel: string; y: number } => {
+    const match = text.match(/^(x'?):\s*([-0-9.]+),\s*(y'?):\s*([-0-9.]+)$/);
     if (!match) {
-      throw new Error(`Unable to parse x-range from: ${text}`);
+      throw new Error(`Unable to parse cursor readout: ${text}`);
     }
-    return [Number(match[1]), Number(match[2])];
+    return {
+      xLabel: match[1],
+      x: Number(match[2]),
+      yLabel: match[3],
+      y: Number(match[4]),
+    };
   };
 
   const parseStandpipePoint = (text: string): [number, number] => {
@@ -60,7 +65,7 @@ test.describe('Flow Net Studio student workflow', () => {
   test('student can draw BCs, solve, probe with standpipe, and export PNG', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Flow Net Studio' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Flow Nets' })).toBeVisible();
     await expect(page.locator('#statusText')).toContainText('Solved');
     const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
     const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
@@ -158,6 +163,39 @@ test.describe('Flow Net Studio student workflow', () => {
     await kx.dispatchEvent('change');
 
     await expect(page.locator('#statusText')).toContainText('isotropic');
+  });
+
+  test('reordering boundary list updates line z-order hit selection', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const clickCanvas = async (rx: number, ry: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
+    };
+
+    await page.locator('#toolRow button[data-tool="equipotential"]').click();
+    await clickCanvas(0.32, 0.44);
+    await clickCanvas(0.68, 0.44);
+
+    await page.locator('#toolRow button[data-tool="noflow-line"]').click();
+    await clickCanvas(0.32, 0.44);
+    await clickCanvas(0.68, 0.44);
+
+    await page.locator('#toolRow button[data-tool="select"]').click();
+    await clickCanvas(0.32, 0.44);
+    await expect(page.locator('#selectedHeadRow')).toHaveClass(/is-hidden/);
+
+    const epLineItem = page.locator('#inventoryList .inventory-item', { hasText: /^EP #/ }).first();
+    const noFlowLineItem = page.locator('#inventoryList .inventory-item', { hasText: /^No-flow line #/ }).first();
+    await epLineItem.dragTo(noFlowLineItem, { targetPosition: { x: 8, y: 2 } });
+
+    await clickCanvas(0.32, 0.44);
+    await expect(page.locator('#selectedHeadRow')).not.toHaveClass(/is-hidden/);
   });
 
   test('mobile layout keeps canvas visible and above controls', async ({ page }) => {
@@ -319,40 +357,8 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#deleteBtn')).toHaveClass(/is-hidden/);
   });
 
-  test('zoom controls update view extents for precision drawing', async ({ page }) => {
+  test('wheel zoom updates cursor coordinates for precision drawing', async ({ page }) => {
     await page.goto('/');
-    const selectedPresetId = await page.locator('#exampleSelect').inputValue();
-    const selectedPreset = presetFor(selectedPresetId);
-    const transformedByDefault =
-      selectedPreset.view.coordinateMode === 'transformed' &&
-      Math.abs(selectedPreset.solver.kx - selectedPreset.solver.ky) > 1e-9;
-    const displayScaleX = transformedByDefault ? Math.sqrt(selectedPreset.solver.ky / selectedPreset.solver.kx) : 1;
-
-    await expect(page.locator('#zoomLabel')).toHaveText('100%');
-    const promptBefore = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [beforeMin, beforeMax] = parseXRange(promptBefore);
-    expect(beforeMin).toBeCloseTo(0, 1);
-    expect(beforeMax).toBeCloseTo(selectedPreset.domain.width * displayScaleX, 1);
-
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await expect(page.locator('#zoomLabel')).toHaveText('125%');
-
-    const promptAfter = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [afterMin, afterMax] = parseXRange(promptAfter);
-    expect(afterMin).toBeGreaterThan(beforeMin);
-    expect(afterMax).toBeLessThan(beforeMax);
-  });
-
-  test('pan mode drag shifts viewed x-range', async ({ page }) => {
-    await page.goto('/');
-
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await page.getByRole('button', { name: 'Pan: Off' }).click();
-    await expect(page.getByRole('button', { name: 'Pan: On' })).toBeVisible();
-
-    const promptBefore = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [beforeMin] = parseXRange(promptBefore);
 
     const canvas = page.locator('#flowCanvas');
     const box = await canvas.boundingBox();
@@ -361,14 +367,47 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Canvas bounding box was null');
     }
 
+    const focus = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+    const probe = { x: box.x + box.width * 0.82, y: box.y + box.height * 0.5 };
+
+    await page.mouse.move(probe.x, probe.y);
+    const before = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+
+    await page.mouse.move(focus.x, focus.y);
+    await page.mouse.wheel(0, -600);
+    await page.mouse.move(probe.x, probe.y);
+
+    const after = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(after.xLabel).toBe(before.xLabel);
+    expect(after.x).toBeLessThan(before.x - 0.25);
+  });
+
+  test('dragging empty canvas in Select pans the viewed range', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const focus = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+    const probe = { x: box.x + box.width * 0.65, y: box.y + box.height * 0.5 };
+
+    await page.mouse.move(focus.x, focus.y);
+    await page.mouse.wheel(0, -600);
+    await page.mouse.move(probe.x, probe.y);
+    const before = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+
     await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.5);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
     await page.mouse.up();
 
-    const promptAfter = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [afterMin] = parseXRange(promptAfter);
-    expect(afterMin).toBeLessThan(beforeMin);
+    await page.mouse.move(probe.x, probe.y);
+    const after = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(after.x).toBeLessThan(before.x - 0.25);
   });
 
   test('url parameter loads canonical example case', async ({ page }) => {
@@ -473,8 +512,8 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const blockedState = JSON.parse(fs.readFileSync(blockedPath, 'utf8'));
-    const blockedLine1 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
-    const blockedLine2 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 2);
+    const blockedLine1 = blockedState.lines.find((line: { id: number }) => line.id === 1);
+    const blockedLine2 = blockedState.lines.find((line: { id: number }) => line.id === 2);
     expect(blockedLine1.vertices).toHaveLength(2);
     expect(blockedLine2.vertices).toHaveLength(2);
 
@@ -492,7 +531,7 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const addedState = JSON.parse(fs.readFileSync(addPath, 'utf8'));
-    const addedLine1 = addedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    const addedLine1 = addedState.lines.find((line: { id: number }) => line.id === 1);
     expect(addedLine1.vertices).toHaveLength(3);
 
     await page.keyboard.down('Control');
@@ -508,7 +547,7 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const removedState = JSON.parse(fs.readFileSync(removePath, 'utf8'));
-    const removedLine1 = removedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    const removedLine1 = removedState.lines.find((line: { id: number }) => line.id === 1);
     expect(removedLine1.vertices).toHaveLength(2);
   });
 
@@ -562,20 +601,28 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#statusText')).toContainText('anisotropic');
     await expect(page.locator('#coordMode')).toHaveValue('real');
 
-    const promptReal = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [realMin, realMax] = parseXRange(promptReal);
-    expect(realMin).toBeCloseTo(0, 1);
-    expect(realMax).toBeCloseTo(anisotropicPreset.domain.width, 1);
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const probe = { x: box.x + box.width * 0.78, y: box.y + box.height * 0.52 };
+    await page.mouse.move(probe.x, probe.y);
+    const realReadout = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(realReadout.xLabel).toBe('x');
+    expect(realReadout.yLabel).toBe('y');
 
     await page.selectOption('#coordMode', 'transformed');
     await expect(page.locator('#coordMode')).toHaveValue('transformed');
-    await expect(page.locator('#canvasPrompt')).toContainText("coords: transformed");
+    await page.mouse.move(probe.x, probe.y);
+    const transformedReadout = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(transformedReadout.xLabel).toBe("x'");
+    expect(transformedReadout.yLabel).toBe("y'");
 
-    const promptTransformed = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [transformedMin, transformedMax] = parseXRange(promptTransformed);
-    const transformedWidth = anisotropicPreset.domain.width * Math.sqrt(anisotropicPreset.solver.ky / anisotropicPreset.solver.kx);
-    expect(transformedMin).toBeCloseTo(0, 1);
-    expect(transformedMax).toBeCloseTo(transformedWidth, 1);
+    expect(Math.sqrt(anisotropicPreset.solver.ky / anisotropicPreset.solver.kx)).toBeLessThan(1);
+    expect(transformedReadout.x).toBeLessThan(realReadout.x - 0.5);
   });
 
   test('student can load a saved state JSON file', async ({ page }) => {
@@ -589,7 +636,7 @@ test.describe('Flow Net Studio student workflow', () => {
       solver: { nx: 101, ny: 51, kx: 2, ky: 1, maxIter: 5000, tolerance: 0.0001, omega: 1.6 },
       view: { contours: 12, streamlines: 10, autoSolve: true, coordinateMode: 'real' },
       newHead: 11,
-      lineBoundaries: [
+      lines: [
         {
           id: 1,
           kind: 'equipotential',

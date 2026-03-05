@@ -102,7 +102,7 @@ interface PersistedFlowNetStateV1 {
   solver: SolverSettings;
   view: ViewSettings;
   newHead: number;
-  lineBoundaries: LineBoundary[];
+  lines: LineBoundary[];
   polygons: NoFlowPolygon[];
   standpipePoint: Point | null;
 }
@@ -146,6 +146,13 @@ interface RenderStyleTokens {
   noFlowColor: string;
   flowLineWidth: number;
   equipotentialWidth: number;
+}
+
+type LineInventoryDropPosition = 'before' | 'after';
+
+interface LineInventoryDropTarget {
+  targetId: number;
+  position: LineInventoryDropPosition;
 }
 
 const marchingCases: Array<Array<[number, number]>> = [
@@ -206,19 +213,17 @@ const newHeadWrap = byId<HTMLLabelElement>('newHeadWrap');
 const solveBtn = byId<HTMLButtonElement>('solveBtn');
 const exportBtn = byId<HTMLButtonElement>('exportBtn');
 const saveStateBtn = byId<HTMLButtonElement>('saveStateBtn');
-const loadStateBtn = byId<HTMLButtonElement>('loadStateBtn');
+// const loadStateBtn = byId<HTMLButtonElement>('loadStateBtn');
 const loadStateInput = byId<HTMLInputElement>('loadStateInput');
 const deleteBtn = byId<HTMLButtonElement>('deleteBtn');
 const toolRow = byId<HTMLDivElement>('toolRow');
 const inventorySummary = byId<HTMLParagraphElement>('inventorySummary');
 const inventoryList = byId<HTMLDivElement>('inventoryList');
-const canvasPrompt = byId<HTMLParagraphElement>('canvasPrompt');
-const zoomInBtn = byId<HTMLButtonElement>('zoomInBtn');
-const zoomOutBtn = byId<HTMLButtonElement>('zoomOutBtn');
 const fitViewBtn = byId<HTMLButtonElement>('fitViewBtn');
-const panModeBtn = byId<HTMLButtonElement>('panModeBtn');
-const zoomLabel = byId<HTMLSpanElement>('zoomLabel');
 const cursorReadout = byId<HTMLSpanElement>('cursorReadout');
+const guideToggleBtn = byId<HTMLButtonElement>('guideToggleBtn');
+const guideOverlay = byId<HTMLDivElement>('guideOverlay');
+const guideCloseBtn = byId<HTMLButtonElement>('guideCloseBtn');
 const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
 
@@ -267,7 +272,6 @@ const state = {
   camera: {
     zoom: 1,
     center: { x: 15, y: 6 } as Point,
-    panMode: false,
     minZoom: 1,
     maxZoom: 12,
   },
@@ -284,6 +288,9 @@ const state = {
 
 let solveTimer: number | null = null;
 let fileDragDepth = 0;
+let guideReturnFocus: HTMLElement | null = null;
+let draggingLineInventoryId: number | null = null;
+let lineInventoryDropTarget: LineInventoryDropTarget | null = null;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
@@ -455,7 +462,6 @@ function loadExampleById(
   state.solution = null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
-  state.camera.panMode = false;
   state.lineBoundaries = [];
   state.polygons = [];
   state.nextId = 1;
@@ -558,6 +564,20 @@ function wireControls(): void {
     render();
   });
 
+  guideToggleBtn.addEventListener('click', () => {
+    openGuideOverlay();
+  });
+
+  guideCloseBtn.addEventListener('click', () => {
+    closeGuideOverlay();
+  });
+
+  guideOverlay.addEventListener('click', (event) => {
+    if (event.target === guideOverlay) {
+      closeGuideOverlay();
+    }
+  });
+
   selectedHeadInput.addEventListener('change', () => {
     if (state.selected?.kind !== 'line') {
       return;
@@ -599,9 +619,9 @@ function wireControls(): void {
     exportStateJson();
   });
 
-  loadStateBtn.addEventListener('click', () => {
-    loadStateInput.click();
-  });
+  // loadStateBtn.addEventListener('click', () => {
+  //   loadStateInput.click();
+  // });
 
   loadStateInput.addEventListener('change', async () => {
     const file = loadStateInput.files?.[0];
@@ -616,30 +636,9 @@ function wireControls(): void {
     deleteSelected();
   });
 
-  zoomInBtn.addEventListener('click', () => {
-    setZoom(state.camera.zoom * 1.25);
-  });
-
-  zoomOutBtn.addEventListener('click', () => {
-    setZoom(state.camera.zoom / 1.25);
-  });
-
   fitViewBtn.addEventListener('click', () => {
     state.camera.zoom = 1;
     state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
-    state.camera.panMode = false;
-    updateGuidanceUI();
-    render();
-    updateCanvasCursor();
-  });
-
-  panModeBtn.addEventListener('click', () => {
-    state.camera.panMode = !state.camera.panMode;
-    if (state.camera.panMode) {
-      state.pendingLineStart = null;
-      state.previewPoint = null;
-      state.drag = { type: 'none' };
-    }
     updateGuidanceUI();
     render();
     updateCanvasCursor();
@@ -781,19 +780,27 @@ function onKeyDown(event: KeyboardEvent): void {
   syncModifierState(event);
   updateCanvasCursor();
 
+  if (event.key === 'Escape' && isGuideOverlayOpen()) {
+    event.preventDefault();
+    closeGuideOverlay();
+    return;
+  }
+
+  if (isGuideOverlayOpen()) {
+    return;
+  }
+
   if (event.key === 'Escape') {
     const hadPendingDraw =
       state.pendingLineStart !== null ||
       state.drag.type === 'polygon-draw' ||
-      state.drag.type === 'pan' ||
-      state.camera.panMode;
+      state.drag.type === 'pan';
     if (!hadPendingDraw) {
       return;
     }
     state.pendingLineStart = null;
     state.previewPoint = null;
     state.drag = { type: 'none' };
-    state.camera.panMode = false;
     updateGuidanceUI();
     render();
     updateCanvasCursor();
@@ -846,6 +853,33 @@ function onKeyUp(event: KeyboardEvent): void {
   updateCanvasCursor();
 }
 
+function isGuideOverlayOpen(): boolean {
+  return !guideOverlay.classList.contains('is-hidden');
+}
+
+function openGuideOverlay(): void {
+  if (isGuideOverlayOpen()) {
+    return;
+  }
+  guideReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  guideOverlay.classList.remove('is-hidden');
+  document.body.classList.add('guide-open');
+  guideToggleBtn.setAttribute('aria-expanded', 'true');
+  guideCloseBtn.focus();
+}
+
+function closeGuideOverlay(): void {
+  if (!isGuideOverlayOpen()) {
+    return;
+  }
+  guideOverlay.classList.add('is-hidden');
+  document.body.classList.remove('guide-open');
+  guideToggleBtn.setAttribute('aria-expanded', 'false');
+  const focusTarget = guideReturnFocus && guideReturnFocus.isConnected ? guideReturnFocus : guideToggleBtn;
+  focusTarget.focus();
+  guideReturnFocus = null;
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -883,7 +917,6 @@ function toOddInteger(value: number): number {
 
 function setTool(tool: Tool): void {
   state.tool = tool;
-  state.camera.panMode = false;
   state.pendingLineStart = null;
   state.previewPoint = null;
   state.drag = { type: 'none' };
@@ -946,20 +979,8 @@ function onPointerDown(event: PointerEvent): void {
 
   canvas.setPointerCapture(event.pointerId);
 
-  if (state.camera.panMode) {
-    state.drag = {
-      type: 'pan',
-      startScreen: screenPoint,
-      startCenter: { ...state.camera.center },
-    };
-    updateGuidanceUI();
-    render();
-    updateCanvasCursor(point);
-    return;
-  }
-
   if (state.tool === 'select') {
-    startSelectionDrag(point, event);
+    startSelectionDrag(point, screenPoint, event);
     render();
     updateCanvasCursor(point);
     return;
@@ -1289,7 +1310,7 @@ function rectangleVerticesFromDrag(start: Point, end: Point): Point[] | null {
   ];
 }
 
-function startSelectionDrag(point: Point, event: PointerEvent): void {
+function startSelectionDrag(point: Point, screenPoint: Point, event: PointerEvent): void {
   const hasModifier = event.altKey || event.ctrlKey || event.metaKey;
 
   if (hasModifier && state.selected) {
@@ -1375,19 +1396,6 @@ function startSelectionDrag(point: Point, event: PointerEvent): void {
     return;
   }
 
-  const polygonHit = findPolygon(point);
-  if (polygonHit) {
-    state.selected = { kind: 'polygon', id: polygonHit.id };
-    state.drag = {
-      type: 'polygon-move',
-      id: polygonHit.id,
-      startPointer: point,
-      startVertices: polygonHit.vertices.map((vertex) => ({ ...vertex })),
-    };
-    updateSelectionPanel();
-    return;
-  }
-
   const lineHit = findLine(point);
   if (lineHit) {
     state.selected = { kind: 'line', id: lineHit.id };
@@ -1401,8 +1409,25 @@ function startSelectionDrag(point: Point, event: PointerEvent): void {
     return;
   }
 
+  const polygonHit = findPolygon(point);
+  if (polygonHit) {
+    state.selected = { kind: 'polygon', id: polygonHit.id };
+    state.drag = {
+      type: 'polygon-move',
+      id: polygonHit.id,
+      startPointer: point,
+      startVertices: polygonHit.vertices.map((vertex) => ({ ...vertex })),
+    };
+    updateSelectionPanel();
+    return;
+  }
+
   state.selected = null;
-  state.drag = { type: 'none' };
+  state.drag = {
+    type: 'pan',
+    startScreen: screenPoint,
+    startCenter: { ...state.camera.center },
+  };
   updateSelectionPanel();
 }
 
@@ -1556,9 +1581,9 @@ function updateCanvasCursor(point = state.hoverPoint): void {
   const selectedLineId = state.selected?.kind === 'line' ? state.selected.id : null;
   const selectedPolygonId = state.selected?.kind === 'polygon' ? state.selected.id : null;
 
-  if (state.camera.panMode) {
-    cursor = state.drag.type === 'pan' ? 'grabbing' : 'grab';
-    mode = state.drag.type === 'pan' ? 'pan-drag' : 'pan';
+  if (state.drag.type === 'pan') {
+    cursor = 'grabbing';
+    mode = 'pan-drag';
   } else if (state.tool === 'select') {
     if (
       state.drag.type === 'line-vertex' ||
@@ -1591,10 +1616,10 @@ function updateCanvasCursor(point = state.hoverPoint): void {
     ) {
       cursor = CURSOR_PLUS;
       mode = 'plus';
-    } else if (hasPoint && (findPolygonVertex(point) || findLineVertex(point))) {
+    } else if (hasPoint && (findLineVertex(point) || findPolygonVertex(point))) {
       cursor = 'grab';
       mode = 'handle';
-    } else if (hasPoint && (findPolygon(point) || findLine(point))) {
+    } else if (hasPoint && (findLine(point) || findPolygon(point))) {
       cursor = 'move';
       mode = 'move';
     }
@@ -1730,11 +1755,9 @@ function updateGuidanceUI(): void {
   newHeadWrap.classList.toggle('is-hidden', state.tool !== 'equipotential');
 
   let stepText = '';
-  if (state.camera.panMode) {
-    stepText = 'Pan mode: drag the canvas to move view. Use + / - (or wheel) to zoom, then Fit to reset.';
-  } else if (state.tool === 'select') {
+  if (state.tool === 'select') {
     stepText =
-      'Click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge of the selected item to add a vertex; Ctrl/Cmd+click a vertex of the selected item to delete.';
+      'Click a boundary/polygon to move. Drag empty space to pan. Drag orange handles to reshape; Alt+click an edge of the selected item to add a vertex; Ctrl/Cmd+click a vertex of the selected item to delete.';
   } else if (state.tool === 'equipotential' || state.tool === 'phreatic' || state.tool === 'noflow-line') {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
@@ -1748,13 +1771,10 @@ function updateGuidanceUI(): void {
   }
 
   toolStep.textContent = stepText;
-  zoomLabel.textContent = `${Math.round(state.camera.zoom * 100)}%`;
-  panModeBtn.textContent = state.camera.panMode ? 'Pan: On' : 'Pan: Off';
-  panModeBtn.classList.toggle('is-active', state.camera.panMode);
 }
 
 function updateBoundaryInventory(): void {
-  const lines = [...state.lineBoundaries].sort((a, b) => a.id - b.id);
+  const lines = [...state.lineBoundaries].reverse();
   const polygons = [...state.polygons].sort((a, b) => a.id - b.id);
 
   inventorySummary.textContent = `${lines.length} line BCs + ${polygons.length} no-flow polygons`;
@@ -1772,6 +1792,10 @@ function updateBoundaryInventory(): void {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'inventory-item';
+    button.classList.add('is-draggable');
+    button.draggable = true;
+    button.dataset.lineId = String(line.id);
+    button.title = 'Drag to reorder z-order';
     if (state.selected?.kind === 'line' && state.selected.id === line.id) {
       button.classList.add('is-selected');
     }
@@ -1783,6 +1807,68 @@ function updateBoundaryInventory(): void {
         : `No-flow line #${line.id}`;
 
     button.textContent = label;
+    button.addEventListener('dragstart', (event) => {
+      draggingLineInventoryId = line.id;
+      lineInventoryDropTarget = null;
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(line.id));
+      }
+      button.classList.add('is-dragging');
+      updateLineInventoryDropIndicators();
+    });
+    button.addEventListener('dragover', (event) => {
+      if (draggingLineInventoryId === null || draggingLineInventoryId === line.id) {
+        return;
+      }
+      event.preventDefault();
+      const rect = button.getBoundingClientRect();
+      const position: LineInventoryDropPosition =
+        event.clientY < rect.top + rect.height * 0.5 ? 'before' : 'after';
+      if (
+        !lineInventoryDropTarget ||
+        lineInventoryDropTarget.targetId !== line.id ||
+        lineInventoryDropTarget.position !== position
+      ) {
+        lineInventoryDropTarget = { targetId: line.id, position };
+        updateLineInventoryDropIndicators();
+      }
+    });
+    button.addEventListener('dragleave', (event) => {
+      if (
+        !(event.currentTarget instanceof HTMLElement) ||
+        event.currentTarget.contains(event.relatedTarget as Node)
+      ) {
+        return;
+      }
+      if (lineInventoryDropTarget?.targetId === line.id) {
+        lineInventoryDropTarget = null;
+        updateLineInventoryDropIndicators();
+      }
+    });
+    button.addEventListener('drop', (event) => {
+      if (draggingLineInventoryId === null || draggingLineInventoryId === line.id) {
+        return;
+      }
+      event.preventDefault();
+      const rect = button.getBoundingClientRect();
+      const position: LineInventoryDropPosition =
+        event.clientY < rect.top + rect.height * 0.5 ? 'before' : 'after';
+      const changed = reorderLineBoundaryZOrder(draggingLineInventoryId, line.id, position);
+      draggingLineInventoryId = null;
+      lineInventoryDropTarget = null;
+      if (changed) {
+        updateSelectionPanel();
+        render();
+      } else {
+        updateLineInventoryDropIndicators();
+      }
+    });
+    button.addEventListener('dragend', () => {
+      draggingLineInventoryId = null;
+      lineInventoryDropTarget = null;
+      updateLineInventoryDropIndicators();
+    });
     button.addEventListener('click', () => {
       state.selected = { kind: 'line', id: line.id };
       updateSelectionPanel();
@@ -1806,6 +1892,63 @@ function updateBoundaryInventory(): void {
     });
     inventoryList.appendChild(button);
   });
+
+  updateLineInventoryDropIndicators();
+}
+
+function reorderLineBoundaryZOrder(
+  draggedLineId: number,
+  targetLineId: number,
+  position: LineInventoryDropPosition,
+): boolean {
+  if (draggedLineId === targetLineId) {
+    return false;
+  }
+
+  const listOrderTopFirst = [...state.lineBoundaries].reverse();
+  const dragIndex = listOrderTopFirst.findIndex((line) => line.id === draggedLineId);
+  const targetIndex = listOrderTopFirst.findIndex((line) => line.id === targetLineId);
+  if (dragIndex < 0 || targetIndex < 0) {
+    return false;
+  }
+
+  const [dragged] = listOrderTopFirst.splice(dragIndex, 1);
+  const updatedTargetIndex = listOrderTopFirst.findIndex((line) => line.id === targetLineId);
+  if (updatedTargetIndex < 0) {
+    return false;
+  }
+  const insertIndex = position === 'before' ? updatedTargetIndex : updatedTargetIndex + 1;
+  listOrderTopFirst.splice(insertIndex, 0, dragged);
+
+  const nextBottomFirst = [...listOrderTopFirst].reverse();
+  const sameOrder = nextBottomFirst.every((line, index) => line.id === state.lineBoundaries[index]?.id);
+  if (sameOrder) {
+    return false;
+  }
+  state.lineBoundaries = nextBottomFirst;
+  return true;
+}
+
+function updateLineInventoryDropIndicators(): void {
+  const items = inventoryList.querySelectorAll<HTMLButtonElement>('.inventory-item[data-line-id]');
+  items.forEach((item) => {
+    item.classList.remove('drop-before', 'drop-after', 'is-dragging');
+    const lineId = Number(item.dataset.lineId);
+    if (Number.isFinite(lineId) && draggingLineInventoryId !== null && lineId === draggingLineInventoryId) {
+      item.classList.add('is-dragging');
+    }
+  });
+
+  if (!lineInventoryDropTarget) {
+    return;
+  }
+
+  const selector = `.inventory-item[data-line-id="${lineInventoryDropTarget.targetId}"]`;
+  const target = inventoryList.querySelector<HTMLButtonElement>(selector);
+  if (!target) {
+    return;
+  }
+  target.classList.add(lineInventoryDropTarget.position === 'before' ? 'drop-before' : 'drop-after');
 }
 
 function updateSelectionPanel(): void {
@@ -2249,7 +2392,7 @@ function computeStreamlines(
   lineBoundaries: LineBoundary[],
   count: number,
 ): Point[][] {
-  const seeds = buildSeeds(domain, solver, active, lineBoundaries, count);
+  const seeds = buildSeeds(domain, solver, active, qx, qy, lineBoundaries, count);
   const lines: Point[][] = [];
 
   seeds.forEach((seed) => {
@@ -2269,9 +2412,15 @@ function buildSeeds(
   domain: DomainSettings,
   solver: SolverSettings,
   active: boolean[][],
+  qx: number[][],
+  qy: number[][],
   lineBoundaries: LineBoundary[],
   count: number,
 ): Point[] {
+  if (count <= 0) {
+    return [];
+  }
+
   const equipotentialLines = lineBoundaries.filter((line) => line.kind === 'equipotential');
   let seedLine: LineBoundary | null = null;
 
@@ -2282,26 +2431,349 @@ function buildSeeds(
   }
 
   const seeds: Point[] = [];
-  const stepNudge = 0.4 * Math.min(domain.width / (solver.nx - 1), domain.height / (solver.ny - 1));
+  const cellSize = Math.min(domain.width / (solver.nx - 1), domain.height / (solver.ny - 1));
+  const stepNudge = 0.4 * cellSize;
+  const seedVertices = seedLine !== null
+    ? getLineVertices(seedLine)
+    : [{ x: 0, y: 0 }, { x: 0, y: domain.height }];
+  const fluxIntervals = buildSeedFluxIntervals(seedVertices, domain, solver, active, qx, qy);
+  const totalFlux = fluxIntervals.reduce((sum, interval) => sum + interval.flux, 0);
   const center = { x: 0.5 * domain.width, y: 0.5 * domain.height };
+  const minSpacing = 0.16 * cellSize;
+  const duplicateSpacing = 0.05 * cellSize;
+  const candidateSeeds: Point[] = [];
+
   for (let idx = 1; idx <= count; idx += 1) {
-    const t = idx / (count + 1);
-    const base = seedLine !== null
-      ? samplePointOnPolyline(getLineVertices(seedLine), t)
-      : { x: 0, y: t * domain.height };
+    const defaultT = idx / (count + 1);
+    let base = samplePointOnPolyline(seedVertices, defaultT);
+    let tangent = estimatePolylineTangent(seedVertices, defaultT);
+    let normal = chooseInwardNormal(
+      base,
+      tangent,
+      center,
+      domain,
+      solver,
+      active,
+      stepNudge,
+    );
 
-    const towardCenter = normalize({ x: center.x - base.x, y: center.y - base.y });
-    const candidate = clampPoint({
-      x: base.x + towardCenter.x * stepNudge,
-      y: base.y + towardCenter.y * stepNudge,
-    });
+    if (totalFlux > 1e-9 && fluxIntervals.length > 0) {
+      const byFlux = sampleSeedByFlux(fluxIntervals, totalFlux * defaultT);
+      if (byFlux) {
+        base = byFlux.point;
+        normal = byFlux.normal;
+        tangent = byFlux.tangent;
+      }
+    }
 
-    if (isPointActive(candidate, domain, solver, active)) {
+    const candidate = findSeedInActiveNeighborhood(base, normal, tangent, stepNudge, domain, solver, active);
+    if (!candidate) {
+      continue;
+    }
+    candidateSeeds.push(candidate);
+  }
+
+  candidateSeeds.forEach((candidate) => {
+    if (seeds.every((seed) => distance(seed, candidate) >= minSpacing)) {
       seeds.push(candidate);
+    }
+  });
+
+  if (seeds.length < count) {
+    candidateSeeds.forEach((candidate) => {
+      if (seeds.length >= count) {
+        return;
+      }
+      if (seeds.every((seed) => distance(seed, candidate) >= duplicateSpacing)) {
+        seeds.push(candidate);
+      }
+    });
+  }
+
+  if (seeds.length < count) {
+    for (let idx = 1; idx <= count && seeds.length < count; idx += 1) {
+      const t = idx / (count + 1);
+      const base = samplePointOnPolyline(seedVertices, t);
+      const tangent = estimatePolylineTangent(seedVertices, t);
+      const normal = chooseInwardNormal(base, tangent, center, domain, solver, active, stepNudge);
+      const fallback = findSeedInActiveNeighborhood(base, normal, tangent, stepNudge, domain, solver, active);
+      if (!fallback) {
+        continue;
+      }
+      if (seeds.every((seed) => distance(seed, fallback) >= duplicateSpacing)) {
+        seeds.push(fallback);
+      }
     }
   }
 
-  return seeds;
+  return seeds.slice(0, count);
+}
+
+interface SeedFluxInterval {
+  start: Point;
+  end: Point;
+  normal: Point;
+  tangent: Point;
+  flux: number;
+}
+
+function buildSeedFluxIntervals(
+  vertices: Point[],
+  domain: DomainSettings,
+  solver: SolverSettings,
+  active: boolean[][],
+  qx: number[][],
+  qy: number[][],
+): SeedFluxInterval[] {
+  if (vertices.length < 2) {
+    return [];
+  }
+
+  const cellSize = Math.min(domain.width / (solver.nx - 1), domain.height / (solver.ny - 1));
+  const sampleSpacing = Math.max(1e-6, 0.5 * cellSize);
+  const probeDistance = 0.45 * cellSize;
+  const center = { x: 0.5 * domain.width, y: 0.5 * domain.height };
+  const intervals: SeedFluxInterval[] = [];
+
+  for (let segmentIndex = 0; segmentIndex < vertices.length - 1; segmentIndex += 1) {
+    const a = vertices[segmentIndex];
+    const b = vertices[segmentIndex + 1];
+    const segmentLength = distance(a, b);
+    if (segmentLength < 1e-9) {
+      continue;
+    }
+
+    const segments = Math.max(1, Math.ceil(segmentLength / sampleSpacing));
+    for (let step = 0; step < segments; step += 1) {
+      const t0 = step / segments;
+      const t1 = (step + 1) / segments;
+      const start = {
+        x: a.x + (b.x - a.x) * t0,
+        y: a.y + (b.y - a.y) * t0,
+      };
+      const end = {
+        x: a.x + (b.x - a.x) * t1,
+        y: a.y + (b.y - a.y) * t1,
+      };
+      const ds = distance(start, end);
+      if (ds < 1e-9) {
+        continue;
+      }
+      const midpoint = { x: 0.5 * (start.x + end.x), y: 0.5 * (start.y + end.y) };
+      const tangent = normalize({ x: end.x - start.x, y: end.y - start.y });
+      if (Math.hypot(tangent.x, tangent.y) < 1e-12) {
+        continue;
+      }
+      let normal = chooseInwardNormal(midpoint, tangent, center, domain, solver, active, probeDistance);
+      const forwardProbe = clampPoint({
+        x: midpoint.x + normal.x * probeDistance,
+        y: midpoint.y + normal.y * probeDistance,
+      });
+      const backwardProbe = clampPoint({
+        x: midpoint.x - normal.x * probeDistance,
+        y: midpoint.y - normal.y * probeDistance,
+      });
+      const forwardActive = isPointActive(forwardProbe, domain, solver, active);
+      const backwardActive = isPointActive(backwardProbe, domain, solver, active);
+      if (!forwardActive && backwardActive) {
+        normal = { x: -normal.x, y: -normal.y };
+      }
+
+      const fluxProbe = clampPoint({
+        x: midpoint.x + normal.x * probeDistance,
+        y: midpoint.y + normal.y * probeDistance,
+      });
+      const fluxSample = isPointActive(fluxProbe, domain, solver, active) ? fluxProbe : midpoint;
+      let velocity = interpolateVectorField(qx, qy, active, domain, solver, fluxSample) ??
+        interpolateVectorField(qx, qy, active, domain, solver, midpoint);
+      if (!velocity) {
+        continue;
+      }
+
+      let normalFlux = velocity.x * normal.x + velocity.y * normal.y;
+      if (normalFlux < 0 && forwardActive && backwardActive) {
+        const flippedNormal = { x: -normal.x, y: -normal.y };
+        const flippedProbe = clampPoint({
+          x: midpoint.x + flippedNormal.x * probeDistance,
+          y: midpoint.y + flippedNormal.y * probeDistance,
+        });
+        const flippedVelocity = interpolateVectorField(qx, qy, active, domain, solver, flippedProbe) ?? velocity;
+        const flippedFlux = flippedVelocity.x * flippedNormal.x + flippedVelocity.y * flippedNormal.y;
+        if (flippedFlux > normalFlux) {
+          normal = flippedNormal;
+          velocity = flippedVelocity;
+          normalFlux = flippedFlux;
+        }
+      }
+
+      const flux = Math.max(0, normalFlux) * ds;
+      intervals.push({
+        start,
+        end,
+        normal,
+        tangent,
+        flux,
+      });
+    }
+  }
+
+  return intervals;
+}
+
+function sampleSeedByFlux(
+  intervals: SeedFluxInterval[],
+  targetFlux: number,
+): { point: Point; normal: Point; tangent: Point } | null {
+  let cumulative = 0;
+  for (const interval of intervals) {
+    if (interval.flux <= 0) {
+      continue;
+    }
+    if (targetFlux <= cumulative + interval.flux) {
+      const localFlux = targetFlux - cumulative;
+      const ratio = clamp(localFlux / interval.flux, 0, 1);
+      return {
+        point: {
+          x: interval.start.x + (interval.end.x - interval.start.x) * ratio,
+          y: interval.start.y + (interval.end.y - interval.start.y) * ratio,
+        },
+        normal: interval.normal,
+        tangent: interval.tangent,
+      };
+    }
+    cumulative += interval.flux;
+  }
+
+  for (let index = intervals.length - 1; index >= 0; index -= 1) {
+    if (intervals[index].flux > 0) {
+      return {
+        point: { ...intervals[index].end },
+        normal: intervals[index].normal,
+        tangent: intervals[index].tangent,
+      };
+    }
+  }
+  return null;
+}
+
+function chooseInwardNormal(
+  point: Point,
+  tangent: Point,
+  center: Point,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  active: boolean[][],
+  probeDistance: number,
+): Point {
+  const normalA = normalize({ x: -tangent.y, y: tangent.x });
+  const normalB = { x: -normalA.x, y: -normalA.y };
+  const probeA = clampPoint({
+    x: point.x + normalA.x * probeDistance,
+    y: point.y + normalA.y * probeDistance,
+  });
+  const probeB = clampPoint({
+    x: point.x + normalB.x * probeDistance,
+    y: point.y + normalB.y * probeDistance,
+  });
+  const activeA = isPointActive(probeA, domain, solver, active);
+  const activeB = isPointActive(probeB, domain, solver, active);
+
+  if (activeA && !activeB) {
+    return normalA;
+  }
+  if (activeB && !activeA) {
+    return normalB;
+  }
+
+  const toCenter = normalize({ x: center.x - point.x, y: center.y - point.y });
+  return toCenter.x * normalA.x + toCenter.y * normalA.y >= 0 ? normalA : normalB;
+}
+
+function estimatePolylineTangent(vertices: Point[], t: number): Point {
+  if (vertices.length < 2) {
+    return { x: 1, y: 0 };
+  }
+  const dt = 1e-3;
+  const before = samplePointOnPolyline(vertices, clamp(t - dt, 0, 1));
+  const after = samplePointOnPolyline(vertices, clamp(t + dt, 0, 1));
+  const tangent = normalize({ x: after.x - before.x, y: after.y - before.y });
+  return Math.hypot(tangent.x, tangent.y) < 1e-12 ? normalize({
+    x: vertices[vertices.length - 1].x - vertices[0].x,
+    y: vertices[vertices.length - 1].y - vertices[0].y,
+  }) : tangent;
+}
+
+function findSeedInActiveNeighborhood(
+  base: Point,
+  normal: Point,
+  tangent: Point,
+  stepNudge: number,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  active: boolean[][],
+): Point | null {
+  const lateralScales = [0, -0.35, 0.35, -0.7, 0.7];
+  const normalScales = [2.2, 1.6, 1.1, 0.8, 0.55, 0.35, 0.15, 0];
+  const tangentUnit = Math.hypot(tangent.x, tangent.y) < 1e-12 ? { x: 0, y: 0 } : normalize(tangent);
+
+  for (const normalScale of normalScales) {
+    for (const lateralScale of lateralScales) {
+      const candidate = clampPoint({
+        x: base.x + normal.x * normalScale * stepNudge + tangentUnit.x * lateralScale * stepNudge,
+        y: base.y + normal.y * normalScale * stepNudge + tangentUnit.y * lateralScale * stepNudge,
+      });
+      if (isPointActive(candidate, domain, solver, active)) {
+        return candidate;
+      }
+    }
+  }
+
+  if (isPointActive(base, domain, solver, active)) {
+    return base;
+  }
+
+  return findNearestActivePoint(base, domain, solver, active, 4);
+}
+
+function findNearestActivePoint(
+  point: Point,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  active: boolean[][],
+  maxRadiusCells: number,
+): Point | null {
+  const dx = domain.width / (solver.nx - 1);
+  const dy = domain.height / (solver.ny - 1);
+  const i0 = clamp(Math.round(point.x / dx), 0, solver.nx - 1);
+  const j0 = clamp(Math.round(point.y / dy), 0, solver.ny - 1);
+
+  for (let radius = 1; radius <= maxRadiusCells; radius += 1) {
+    let best: Point | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let dj = -radius; dj <= radius; dj += 1) {
+      for (let di = -radius; di <= radius; di += 1) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== radius) {
+          continue;
+        }
+        const i = i0 + di;
+        const j = j0 + dj;
+        if (i < 0 || i >= solver.nx || j < 0 || j >= solver.ny || !active[j][i]) {
+          continue;
+        }
+        const candidate = { x: i * dx, y: j * dy };
+        const dist = distance(point, candidate);
+        if (dist < bestDist) {
+          best = candidate;
+          bestDist = dist;
+        }
+      }
+    }
+    if (best) {
+      return best;
+    }
+  }
+
+  return null;
 }
 
 function traceStream(
@@ -2484,7 +2956,6 @@ function render(): void {
   const rect = canvas.getBoundingClientRect();
   const view = getCanvasView();
   const viewport = view.viewport;
-  updateCanvasPrompt(view);
   updateCursorReadout();
 
   ctx.font = '500 14px "Montserrat", sans-serif';
@@ -2525,16 +2996,6 @@ function render(): void {
     drawHeadColorbar(view, state.solution);
   }
   drawSelectionHandles(view);
-}
-
-function updateCanvasPrompt(view: CanvasView): void {
-  const displayBounds = mapBoundsToDisplay(view.bounds);
-  const xMin = displayBounds.xMin.toFixed(1);
-  const xMax = (displayBounds.xMin + displayBounds.width).toFixed(1);
-  const yMin = displayBounds.yMin.toFixed(1);
-  const yMax = (displayBounds.yMin + displayBounds.height).toFixed(1);
-  const modeLabel = state.view.coordinateMode === 'transformed' ? 'transformed' : 'real';
-  canvasPrompt.textContent = `View x:${xMin}-${xMax}m y:${yMin}-${yMax}m | coords: ${modeLabel}`;
 }
 
 function drawDomainOutline(view: CanvasView): void {
@@ -3116,7 +3577,7 @@ function exportStateJson(): void {
     solver: { ...state.solver },
     view: { ...state.view },
     newHead: readNumber(newHeadInput, 8, -200, 200),
-    lineBoundaries: state.lineBoundaries.map((line) => ({
+    lines: state.lineBoundaries.map((line) => ({
       id: line.id,
       kind: line.kind,
       vertices: getLineVertices(line).map((vertex) => ({ ...vertex })),
@@ -3190,7 +3651,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
   };
 
   const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
-  const lineBoundaries = readLineBoundaries(root.lineBoundaries);
+  const lines = readPersistedLines(root.lines);
   const polygons = readPolygons(root.polygons);
   const standpipePoint = readOptionalPoint(root.standpipePoint, 'standpipePoint');
 
@@ -3202,7 +3663,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
     solver,
     view,
     newHead,
-    lineBoundaries,
+    lines,
     polygons,
     standpipePoint,
   };
@@ -3221,9 +3682,8 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.standpipePoint = imported.standpipePoint ? clampPoint(imported.standpipePoint) : null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
-  state.camera.panMode = false;
 
-  state.lineBoundaries = imported.lineBoundaries.map((line) => ({
+  state.lineBoundaries = imported.lines.map((line) => ({
     id: line.id,
     kind: line.kind,
     vertices: normalizeLineVertices(line.vertices.map((vertex) => clampPoint(vertex))),
@@ -3271,22 +3731,22 @@ function clearExampleInUrl(): void {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-function readLineBoundaries(value: unknown): LineBoundary[] {
+function readPersistedLines(value: unknown): LineBoundary[] {
   if (!Array.isArray(value)) {
-    throw new Error('lineBoundaries must be an array.');
+    throw new Error('lines must be an array.');
   }
   return value.map((entry, index) => {
-    const record = asRecord(entry, `lineBoundaries[${index}]`);
-    const kind = readLineKind(record.kind, `lineBoundaries[${index}].kind`);
+    const record = asRecord(entry, `lines[${index}]`);
+    const kind = readLineKind(record.kind, `lines[${index}].kind`);
     if (!Array.isArray(record.vertices) || record.vertices.length < 2) {
-      throw new Error(`lineBoundaries[${index}].vertices must contain at least 2 points.`);
+      throw new Error(`lines[${index}].vertices must contain at least 2 points.`);
     }
     const vertices = record.vertices.map((vertex, vertexIndex) =>
-      readPoint(vertex, `lineBoundaries[${index}].vertices[${vertexIndex}]`),
+      readPoint(vertex, `lines[${index}].vertices[${vertexIndex}]`),
     );
-    const id = readInteger(record.id, `lineBoundaries[${index}].id`, 1, 1_000_000);
+    const id = readInteger(record.id, `lines[${index}].id`, 1, 1_000_000);
     const head = kind === 'equipotential'
-      ? readNumberValue(record.head, `lineBoundaries[${index}].head`, -200, 200)
+      ? readNumberValue(record.head, `lines[${index}].head`, -200, 200)
       : 0;
     return { id, kind, vertices, head };
   });
