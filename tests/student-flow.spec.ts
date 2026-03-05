@@ -98,7 +98,7 @@ test.describe('Flow Net Studio student workflow', () => {
     );
 
     await page.getByRole('button', { name: /Phreatic #/ }).click();
-    await expect(page.locator('#selectionType')).toContainText('Phreatic line');
+    await expect(page.locator('#deleteBtn')).not.toHaveClass(/is-hidden/);
 
     await page.getByRole('button', { name: 'Standpipe' }).click();
     await page.mouse.click(point(0.52, 0.45).x, point(0.52, 0.45).y);
@@ -310,13 +310,13 @@ test.describe('Flow Net Studio student workflow', () => {
       .filter({ hasText: /EP #|Phreatic #|No-flow line #/ })
       .first();
     await firstLineItem.click();
-    await expect(page.locator('#selectionType')).not.toContainText('Nothing selected.');
+    await expect(page.locator('#deleteBtn')).not.toHaveClass(/is-hidden/);
 
     await page.keyboard.press('Delete');
     await expect(page.locator('#inventorySummary')).toContainText(
       inventorySummaryText(startingLines - 1, startingPolygons),
     );
-    await expect(page.locator('#selectionType')).toContainText('Nothing selected.');
+    await expect(page.locator('#deleteBtn')).toHaveClass(/is-hidden/);
   });
 
   test('zoom controls update view extents for precision drawing', async ({ page }) => {
