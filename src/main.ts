@@ -3210,12 +3210,12 @@ function drawHeadColorbar(view: CanvasView, solution: Solution): void {
 
   const barWidth = 14;
   const barHeight = Math.max(110, Math.min(180, Math.round(view.viewport.height * 0.42)));
-  const x = view.viewport.left + view.viewport.width - barWidth - 14;
-  const y = view.viewport.top + 16;
+  const x = view.viewport.left + view.viewport.width - barWidth - 72;
+  const y = view.viewport.top + 36;
 
   ctx.save();
   ctx.fillStyle = 'rgba(15, 23, 42, 0.62)';
-  ctx.fillRect(x - 24, y - 12, 86, barHeight + 24);
+  ctx.fillRect(x - 24, y - 30, 100, barHeight + 42);
 
   const gradient = ctx.createLinearGradient(0, y + barHeight, 0, y);
   gradient.addColorStop(0, headColor(minHead, minHead, maxHead));
@@ -3235,7 +3235,7 @@ function drawHeadColorbar(view: CanvasView, solution: Solution): void {
   ctx.fillText(`${(0.5 * (maxHead + minHead)).toFixed(2)} m`, x + barWidth + 7, y + 0.5 * barHeight);
   ctx.fillText(`${minHead.toFixed(2)} m`, x + barWidth + 7, y + barHeight - 1);
   ctx.textBaseline = 'bottom';
-  ctx.fillText('Head', x - 2, y - 4);
+  ctx.fillText('Head', x - 2, y - 12);
   ctx.restore();
 }
 
