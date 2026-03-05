@@ -74,6 +74,7 @@
                 <option value="transformed">Transformed (x', y')</option>
               </select>
             </label>
+            <label class="inline-check"><input id="showHeadMap" type="checkbox">Show head values</label>
             <label class="inline-check"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
           </div>
           <div class="action-row">
@@ -108,12 +109,12 @@
           <h2>Guide</h2>
           <ul>
             <li>Default outer boundary is no-flow unless you draw EP/phreatic lines.</li>
-            <li>EP lines impose fixed hydraulic head.</li>
+            <li>EP lines impose fixed hydraulic head. Datum is always taken to be the bottom of the domain.</li>
             <li>Phreatic line is a user-drawn fixed head equal to elevation.</li>
             <li>No-flow lines and no-flow polygons act as impermeable boundaries.</li>
             <li>Canvas controls: <strong>+</strong>/<strong>-</strong> zoom, <strong>Pan</strong> drag, <strong>Fit</strong> reset view.</li>
             <li>Keyboard: <strong>Esc</strong> cancels drawing, <strong>Delete</strong> removes selected item.</li>
-            <li>Polygon edit shortcuts in Select: <strong>Alt</strong>+edge click adds vertex, <strong>Ctrl/Cmd</strong>+vertex click deletes.</li>
+            <li>Line/polygon edit shortcuts in Select: choose an item first, then <strong>Alt</strong>+edge click adds vertex, <strong>Ctrl/Cmd</strong>+vertex click deletes.</li>
           </ul>
         </section>
       </aside>
@@ -121,6 +122,7 @@
       <main class="canvas-wrap" id="canvasWrap">
         <div class="canvas-toolbar">
           <p id="canvasPrompt">Select a tool, draw boundaries, then solve and probe with the standpipe.</p>
+          <span id="cursorReadout" class="cursor-readout">x: -, y: -</span>
           <div class="view-controls">
             <button id="zoomOutBtn" type="button" aria-label="Zoom out">-</button>
             <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>

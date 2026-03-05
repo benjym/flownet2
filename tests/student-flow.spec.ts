@@ -1,6 +1,46 @@
+import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 test.describe('Flow Net Studio student workflow', () => {
+  interface PresetFixture {
+    id: string;
+    label: string;
+    summary: string;
+    domain: { width: number; height: number };
+    solver: { kx: number; ky: number };
+    view: { coordinateMode: 'real' | 'transformed' };
+    lines: Array<{ kind: string; vertices: Array<{ x: number; y: number }> }>;
+    polygons?: Array<{ vertices: Array<{ x: number; y: number }> }>;
+    standpipePoint?: { x: number; y: number } | null;
+  }
+
+  const presets = JSON.parse(fs.readFileSync('public/example-presets.json', 'utf8')) as PresetFixture[];
+  const presetById = new Map(presets.map((preset) => [preset.id, preset]));
+
+  const presetFor = (id: string): PresetFixture => {
+    const preset = presetById.get(id);
+    if (!preset) {
+      throw new Error(`Missing preset "${id}" in public/example-presets.json`);
+    }
+    return preset;
+  };
+
+  const presetLineCount = (preset: PresetFixture): number => preset.lines.length;
+
+  const presetPolygonCount = (preset: PresetFixture): number =>
+    Array.isArray(preset.polygons) ? preset.polygons.length : 0;
+
+  const inventorySummaryText = (lineCount: number, polygonCount: number): string =>
+    `${lineCount} line BCs + ${polygonCount} no-flow polygons`;
+
+  const parseInventorySummary = (text: string): [number, number] => {
+    const match = text.match(/(\d+) line BCs \+ (\d+) no-flow polygons/);
+    if (!match) {
+      throw new Error(`Unable to parse inventory summary: ${text}`);
+    }
+    return [Number(match[1]), Number(match[2])];
+  };
+
   const parseXRange = (text: string): [number, number] => {
     const match = text.match(/x:([0-9.]+)-([0-9.]+)m/);
     if (!match) {
@@ -14,6 +54,8 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await expect(page.getByRole('heading', { name: 'Flow Net Studio' })).toBeVisible();
     await expect(page.locator('#statusText')).toContainText('Solved');
+    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
+    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
 
     const canvas = page.locator('#flowCanvas');
     await expect(canvas).toBeVisible();
@@ -34,14 +76,18 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.click(point(0.24, 0.32).x, point(0.24, 0.32).y);
     await expect(page.locator('#toolStep')).toContainText('Step 2 of 2');
     await page.mouse.click(point(0.76, 0.24).x, point(0.76, 0.24).y);
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs');
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(startingLines + 1, startingPolygons),
+    );
 
     await page.getByRole('button', { name: 'No-flow polygon' }).click();
     await page.mouse.move(point(0.42, 0.53).x, point(0.42, 0.53).y);
     await page.mouse.down();
     await page.mouse.move(point(0.58, 0.68).x, point(0.58, 0.68).y);
     await page.mouse.up();
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 1 no-flow polygons');
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(startingLines + 1, startingPolygons + 1),
+    );
 
     await page.getByRole('button', { name: /Phreatic #/ }).click();
     await expect(page.locator('#selectionType')).toContainText('Phreatic line');
@@ -66,6 +112,8 @@ test.describe('Flow Net Studio student workflow', () => {
 
   test('draw guidance supports first-click/second-click flow and Esc cancellation', async ({ page }) => {
     await page.goto('/');
+    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
+    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
 
     const canvas = page.locator('#flowCanvas');
     const box = await canvas.boundingBox();
@@ -84,7 +132,9 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#toolStep')).toContainText('Step 1 of 2');
-    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 0 no-flow polygons');
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(startingLines, startingPolygons),
+    );
   });
 
   test('anisotropy change updates solver status', async ({ page }) => {
@@ -123,25 +173,88 @@ test.describe('Flow Net Studio student workflow', () => {
     expect(canvasBox.y).toBeLessThan(panelBox.y);
   });
 
-  test('Delete key removes selected boundary from inventory', async ({ page }) => {
+  test('canvas wrap shrinks again after viewport is reduced', async ({ page }) => {
+    await page.setViewportSize({ width: 1300, height: 700 });
     await page.goto('/');
 
-    await page.getByRole('button', { name: 'EP #1 (h=10.00m)' }).click();
-    await expect(page.locator('#selectionType')).toContainText('Equipotential line #1');
+    const canvasWrap = page.locator('.canvas-wrap');
+    const initialBox = await canvasWrap.boundingBox();
+    expect(initialBox).not.toBeNull();
+    if (!initialBox) {
+      throw new Error('Canvas wrap bounding box was null at initial size');
+    }
+
+    await page.setViewportSize({ width: 1300, height: 1100 });
+    await page.waitForTimeout(120);
+    const grownBox = await canvasWrap.boundingBox();
+    expect(grownBox).not.toBeNull();
+    if (!grownBox) {
+      throw new Error('Canvas wrap bounding box was null after growth');
+    }
+    expect(grownBox.height).toBeGreaterThan(initialBox.height + 200);
+
+    await page.setViewportSize({ width: 1300, height: 700 });
+    await page.waitForTimeout(120);
+    const shrunkBox = await canvasWrap.boundingBox();
+    expect(shrunkBox).not.toBeNull();
+    if (!shrunkBox) {
+      throw new Error('Canvas wrap bounding box was null after shrink');
+    }
+    expect(shrunkBox.height).toBeLessThan(grownBox.height - 200);
+    expect(Math.abs(shrunkBox.height - initialBox.height)).toBeLessThan(3);
+  });
+
+  test('toolbar shows current cursor coordinates over the canvas', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await expect(page.locator('#cursorReadout')).toHaveText(/x: [0-9.-]+, y: [0-9.-]+/);
+
+    await page.mouse.move(box.x - 20, box.y - 20);
+    await expect(page.locator('#cursorReadout')).toHaveText('x: -, y: -');
+  });
+
+  test('Delete key removes selected boundary from inventory', async ({ page }) => {
+    await page.goto('/');
+    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
+    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
+    expect(startingLines).toBeGreaterThan(0);
+
+    const firstLineItem = page
+      .locator('#inventoryList .inventory-item')
+      .filter({ hasText: /EP #|Phreatic #|No-flow line #/ })
+      .first();
+    await firstLineItem.click();
+    await expect(page.locator('#selectionType')).not.toContainText('Nothing selected.');
 
     await page.keyboard.press('Delete');
-    await expect(page.locator('#inventorySummary')).toContainText('1 line BCs + 0 no-flow polygons');
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(startingLines - 1, startingPolygons),
+    );
     await expect(page.locator('#selectionType')).toContainText('Nothing selected.');
   });
 
   test('zoom controls update view extents for precision drawing', async ({ page }) => {
     await page.goto('/');
+    const selectedPresetId = await page.locator('#exampleSelect').inputValue();
+    const selectedPreset = presetFor(selectedPresetId);
+    const transformedByDefault =
+      selectedPreset.view.coordinateMode === 'transformed' &&
+      Math.abs(selectedPreset.solver.kx - selectedPreset.solver.ky) > 1e-9;
+    const displayScaleX = transformedByDefault ? Math.sqrt(selectedPreset.solver.ky / selectedPreset.solver.kx) : 1;
 
     await expect(page.locator('#zoomLabel')).toHaveText('100%');
     const promptBefore = (await page.locator('#canvasPrompt').innerText()).trim();
     const [beforeMin, beforeMax] = parseXRange(promptBefore);
     expect(beforeMin).toBeCloseTo(0, 1);
-    expect(beforeMax).toBeCloseTo(30, 1);
+    expect(beforeMax).toBeCloseTo(selectedPreset.domain.width * displayScaleX, 1);
 
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect(page.locator('#zoomLabel')).toHaveText('125%');
@@ -181,26 +294,35 @@ test.describe('Flow Net Studio student workflow', () => {
   });
 
   test('url parameter loads canonical example case', async ({ page }) => {
+    const cutoffWallPreset = presetFor('cutoff-wall');
     await page.goto('/?example=cutoff-wall');
 
     await expect(page.locator('#exampleSelect')).toHaveValue('cutoff-wall');
-    await expect(page.locator('#exampleSummary')).toContainText(/cutoff wall/i);
-    await expect(page.locator('#domainWidth')).toHaveValue('38');
-    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 1 no-flow polygons');
-    await expect(page.getByRole('button', { name: /No-flow polygon #/ })).toBeVisible();
+    await expect(page.locator('#exampleSummary')).toContainText(cutoffWallPreset.label);
+    await expect(page.locator('#domainWidth')).toHaveValue(String(cutoffWallPreset.domain.width));
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(presetLineCount(cutoffWallPreset), presetPolygonCount(cutoffWallPreset)),
+    );
+    if (presetPolygonCount(cutoffWallPreset) > 0) {
+      await expect(page.getByRole('button', { name: /No-flow polygon #/ })).toBeVisible();
+    }
   });
 
   test('student can switch to drain example from preset picker', async ({ page }) => {
+    const drainPreset = presetFor('drain');
     await page.goto('/');
 
     await page.selectOption('#exampleSelect', 'drain');
 
-    await expect(page.locator('#domainWidth')).toHaveValue('32');
-    await expect(page.locator('#kx')).toHaveValue('1');
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 1 no-flow polygons');
-    await expect(page.getByRole('button', { name: /EP #3/ })).toBeVisible();
-    await expect(page.locator('#standpipeText')).toContainText('head');
-    await expect(page.locator('#exampleSummary')).toContainText(/drain/i);
+    await expect(page.locator('#domainWidth')).toHaveValue(String(drainPreset.domain.width));
+    await expect(page.locator('#kx')).toHaveValue(String(drainPreset.solver.kx));
+    await expect(page.locator('#inventorySummary')).toContainText(
+      inventorySummaryText(presetLineCount(drainPreset), presetPolygonCount(drainPreset)),
+    );
+    if (drainPreset.standpipePoint) {
+      await expect(page.locator('#standpipeText')).not.toContainText('Choose the standpipe tool');
+    }
+    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.label);
   });
 
   test('student can insert and delete polygon vertices with keyboard modifiers', async ({ page }) => {
@@ -241,6 +363,75 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.click(rightX, topY);
     await page.keyboard.up('Control');
     await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
+  });
+
+  test('selected line supports alt-add and ctrl-delete vertices only on selected object', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+    const leftBoundaryMid = point(0.02, 0.5);
+
+    await page.getByRole('button', { name: /EP #2/ }).click();
+    await page.keyboard.down('Alt');
+    await page.mouse.click(leftBoundaryMid.x, leftBoundaryMid.y);
+    await page.keyboard.up('Alt');
+
+    const blockedDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const blockedDownload = await blockedDownloadPromise;
+    const blockedPath = await blockedDownload.path();
+    expect(blockedPath).not.toBeNull();
+    if (!blockedPath) {
+      throw new Error('Save-state download path was null');
+    }
+    const blockedState = JSON.parse(fs.readFileSync(blockedPath, 'utf8'));
+    const blockedLine1 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    const blockedLine2 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 2);
+    expect(blockedLine1.vertices).toHaveLength(2);
+    expect(blockedLine2.vertices).toHaveLength(2);
+
+    await page.getByRole('button', { name: /EP #1/ }).click();
+    await page.keyboard.down('Alt');
+    await page.mouse.click(leftBoundaryMid.x, leftBoundaryMid.y);
+    await page.keyboard.up('Alt');
+
+    const addDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const addDownload = await addDownloadPromise;
+    const addPath = await addDownload.path();
+    expect(addPath).not.toBeNull();
+    if (!addPath) {
+      throw new Error('Save-state download path was null');
+    }
+    const addedState = JSON.parse(fs.readFileSync(addPath, 'utf8'));
+    const addedLine1 = addedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    expect(addedLine1.vertices).toHaveLength(3);
+
+    await page.keyboard.down('Control');
+    await page.mouse.click(leftBoundaryMid.x, leftBoundaryMid.y);
+    await page.keyboard.up('Control');
+
+    const removeDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const removeDownload = await removeDownloadPromise;
+    const removePath = await removeDownload.path();
+    expect(removePath).not.toBeNull();
+    if (!removePath) {
+      throw new Error('Save-state download path was null');
+    }
+    const removedState = JSON.parse(fs.readFileSync(removePath, 'utf8'));
+    const removedLine1 = removedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    expect(removedLine1.vertices).toHaveLength(2);
   });
 
   test('select cursor shows plus/minus modes for polygon add/remove shortcuts', async ({ page }) => {
@@ -287,6 +478,7 @@ test.describe('Flow Net Studio student workflow', () => {
   });
 
   test('anisotropic transformed-coordinate toggle changes displayed x-extent', async ({ page }) => {
+    const anisotropicPreset = presetFor('anisotropic-demo');
     await page.goto('/?example=anisotropic-demo');
 
     await expect(page.locator('#statusText')).toContainText('anisotropic');
@@ -295,7 +487,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const promptReal = (await page.locator('#canvasPrompt').innerText()).trim();
     const [realMin, realMax] = parseXRange(promptReal);
     expect(realMin).toBeCloseTo(0, 1);
-    expect(realMax).toBeCloseTo(30, 1);
+    expect(realMax).toBeCloseTo(anisotropicPreset.domain.width, 1);
 
     await page.selectOption('#coordMode', 'transformed');
     await expect(page.locator('#coordMode')).toHaveValue('transformed');
@@ -303,8 +495,9 @@ test.describe('Flow Net Studio student workflow', () => {
 
     const promptTransformed = (await page.locator('#canvasPrompt').innerText()).trim();
     const [transformedMin, transformedMax] = parseXRange(promptTransformed);
+    const transformedWidth = anisotropicPreset.domain.width * Math.sqrt(anisotropicPreset.solver.ky / anisotropicPreset.solver.kx);
     expect(transformedMin).toBeCloseTo(0, 1);
-    expect(transformedMax).toBeCloseTo(15, 1);
+    expect(transformedMax).toBeCloseTo(transformedWidth, 1);
   });
 
   test('student can load a saved state JSON file', async ({ page }) => {
@@ -322,8 +515,10 @@ test.describe('Flow Net Studio student workflow', () => {
         {
           id: 1,
           kind: 'equipotential',
-          p1: { x: 0, y: 0 },
-          p2: { x: 0, y: 14 },
+          vertices: [
+            { x: 0, y: 0 },
+            { x: 0, y: 14 },
+          ],
           head: 11,
         },
       ],

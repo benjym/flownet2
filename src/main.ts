@@ -10,8 +10,7 @@ interface Point {
 interface LineBoundary {
   id: number;
   kind: LineKind;
-  p1: Point;
-  p2: Point;
+  vertices: Point[];
   head: number;
 }
 
@@ -40,6 +39,7 @@ interface ViewSettings {
   streamlines: number;
   autoSolve: boolean;
   coordinateMode: CoordinateMode;
+  showHeadMap: boolean;
 }
 
 interface ContourSegment {
@@ -73,8 +73,7 @@ interface StandpipeReading {
 
 interface PresetLine {
   kind: LineKind;
-  p1: Point;
-  p2: Point;
+  vertices: Point[];
   head?: number;
 }
 
@@ -112,8 +111,8 @@ type Selected = { kind: 'line'; id: number } | { kind: 'polygon'; id: number } |
 
 type DragState =
   | { type: 'none' }
-  | { type: 'line-end'; id: number; endpoint: 'p1' | 'p2' }
-  | { type: 'line-move'; id: number; startPointer: Point; startP1: Point; startP2: Point }
+  | { type: 'line-vertex'; id: number; vertexIndex: number }
+  | { type: 'line-move'; id: number; startPointer: Point; startVertices: Point[] }
   | { type: 'pan'; startScreen: Point; startCenter: Point }
   | { type: 'polygon-move'; id: number; startPointer: Point; startVertices: Point[] }
   | { type: 'polygon-vertex'; id: number; vertexIndex: number }
@@ -136,6 +135,16 @@ interface ViewBounds {
 interface CanvasView {
   viewport: Viewport;
   bounds: ViewBounds;
+}
+
+interface RenderStyleTokens {
+  soilColor: string;
+  flowLineColor: string;
+  equipotentialColor: string;
+  phreaticColor: string;
+  noFlowColor: string;
+  flowLineWidth: number;
+  equipotentialWidth: number;
 }
 
 const marchingCases: Array<Array<[number, number]>> = [
@@ -165,135 +174,7 @@ const marchingCases: Array<Array<[number, number]>> = [
 
 const DEFAULT_EXAMPLE_ID = 'uniform-ep';
 
-const EXAMPLE_PRESETS: ExamplePreset[] = [
-  {
-    id: 'uniform-ep',
-    label: 'Uniform EP Gradient (Baseline)',
-    summary: 'Two equipotential boundaries produce near-parallel flow through homogeneous soil.',
-    domain: { width: 30, height: 12 },
-    solver: { nx: 81, ny: 41, kx: 1, ky: 1, maxIter: 4000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 14, streamlines: 12, autoSolve: true, coordinateMode: 'real' },
-    newHead: 8,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
-      { kind: 'equipotential', p1: { x: 30, y: 0 }, p2: { x: 30, y: 12 }, head: 2 },
-    ],
-  },
-  {
-    id: 'earth-dam',
-    label: 'Flow Through Earth Dam',
-    summary:
-      'Upstream reservoir head, downstream tailwater, and a user-drawn phreatic line over a compact impervious cutoff.',
-    domain: { width: 45, height: 16 },
-    solver: { nx: 101, ny: 51, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
-    newHead: 10,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 13.5 }, head: 13.5 },
-      { kind: 'equipotential', p1: { x: 45, y: 0 }, p2: { x: 45, y: 2.2 }, head: 2.2 },
-      { kind: 'phreatic', p1: { x: 2.8, y: 13.1 }, p2: { x: 35.8, y: 2.8 } },
-    ],
-    polygons: [
-      {
-        vertices: [
-          { x: 20.5, y: 0 },
-          { x: 24.5, y: 0 },
-          { x: 23.2, y: 5.4 },
-          { x: 21.8, y: 5.4 },
-        ],
-      },
-    ],
-    standpipePoint: { x: 30, y: 4.8 },
-  },
-  {
-    id: 'cutoff-wall',
-    label: 'Flow Under Cutoff Wall',
-    summary: 'An impermeable cutoff-wall polygon forces seepage to dive deeper below the wall tip.',
-    domain: { width: 38, height: 12 },
-    solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.65 },
-    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
-    newHead: 9,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
-      { kind: 'equipotential', p1: { x: 38, y: 0 }, p2: { x: 38, y: 12 }, head: 3 },
-    ],
-    polygons: [
-      {
-        vertices: [
-          { x: 18.2, y: 0 },
-          { x: 18.8, y: 0 },
-          { x: 18.8, y: 8.8 },
-          { x: 18.2, y: 8.8 },
-        ],
-      },
-    ],
-    standpipePoint: { x: 22.8, y: 5.2 },
-  },
-  {
-    id: 'drain',
-    label: 'Flow Into Drain',
-    summary: 'Regional gradient with a low-head drain line and an impermeable inclusion to bend paths.',
-    domain: { width: 32, height: 12 },
-    solver: { nx: 91, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 15, streamlines: 16, autoSolve: true, coordinateMode: 'real' },
-    newHead: 8,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 9.5 },
-      { kind: 'equipotential', p1: { x: 32, y: 0 }, p2: { x: 32, y: 12 }, head: 6.2 },
-      { kind: 'equipotential', p1: { x: 14.2, y: 0.7 }, p2: { x: 17.8, y: 0.7 }, head: 1.8 },
-    ],
-    polygons: [
-      {
-        vertices: [
-          { x: 5.2, y: 2.3 },
-          { x: 10.8, y: 2.1 },
-          { x: 13.4, y: 5.4 },
-          { x: 8.2, y: 6.5 },
-          { x: 5, y: 4.4 },
-        ],
-      },
-    ],
-    standpipePoint: { x: 15.8, y: 4.6 },
-  },
-  {
-    id: 'sheet-pile',
-    label: 'Seepage Beneath Sheet Pile',
-    summary: 'A thin sheet-pile polygon interrupts shallow flow and bends equipotentials below its tip.',
-    domain: { width: 40, height: 12 },
-    solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5200, tolerance: 1e-4, omega: 1.65 },
-    view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
-    newHead: 9,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10.5 },
-      { kind: 'equipotential', p1: { x: 40, y: 0 }, p2: { x: 40, y: 12 }, head: 3 },
-    ],
-    polygons: [
-      {
-        vertices: [
-          { x: 19.7, y: 12 },
-          { x: 20.3, y: 12 },
-          { x: 20.3, y: 5.3 },
-          { x: 19.7, y: 5.3 },
-        ],
-      },
-    ],
-    standpipePoint: { x: 24, y: 5.4 },
-  },
-  {
-    id: 'anisotropic-demo',
-    label: 'Anisotropic Classroom Demo',
-    summary: 'Same boundary heads with Kx > Ky to illustrate non-orthogonal EP/flow-line behavior.',
-    domain: { width: 30, height: 12 },
-    solver: { nx: 81, ny: 41, kx: 4, ky: 1, maxIter: 4500, tolerance: 1e-4, omega: 1.6 },
-    view: { contours: 14, streamlines: 12, autoSolve: true, coordinateMode: 'real' },
-    newHead: 8,
-    lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
-      { kind: 'equipotential', p1: { x: 30, y: 0 }, p2: { x: 30, y: 12 }, head: 2 },
-    ],
-    standpipePoint: { x: 15, y: 6 },
-  },
-];
+let examplePresets: ExamplePreset[] = [];
 
 const canvas = byId<HTMLCanvasElement>('flowCanvas');
 const ctx = getContext2D(canvas);
@@ -312,6 +193,7 @@ const omegaInput = byId<HTMLInputElement>('omega');
 const contoursInput = byId<HTMLInputElement>('contours');
 const streamlinesInput = byId<HTMLInputElement>('streamlines');
 const coordModeSelect = byId<HTMLSelectElement>('coordMode');
+const showHeadMapInput = byId<HTMLInputElement>('showHeadMap');
 const autoSolveInput = byId<HTMLInputElement>('autoSolve');
 const statusText = byId<HTMLParagraphElement>('statusText');
 const standpipeText = byId<HTMLParagraphElement>('standpipeText');
@@ -335,6 +217,7 @@ const zoomOutBtn = byId<HTMLButtonElement>('zoomOutBtn');
 const fitViewBtn = byId<HTMLButtonElement>('fitViewBtn');
 const panModeBtn = byId<HTMLButtonElement>('panModeBtn');
 const zoomLabel = byId<HTMLSpanElement>('zoomLabel');
+const cursorReadout = byId<HTMLSpanElement>('cursorReadout');
 const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
 
@@ -359,6 +242,7 @@ const state = {
     streamlines: 12,
     autoSolve: true,
     coordinateMode: 'real',
+    showHeadMap: false,
   } as ViewSettings,
   tool: 'select' as Tool,
   pendingLineStart: null as Point | null,
@@ -392,14 +276,12 @@ let solveTimer: number | null = null;
 let fileDragDepth = 0;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
+const RENDER_STYLE = readRenderStyleTokens();
 
 wireControls();
-initExamplePicker();
-const initialExampleId = getRequestedExampleFromUrl() ?? DEFAULT_EXAMPLE_ID;
-loadExampleById(initialExampleId, { updateUrl: false, solve: false });
 resizeCanvas();
-solveAndRender();
 updateCanvasCursor();
+void initializeExamplesAndSolve();
 window.addEventListener('resize', () => {
   resizeCanvas();
   render();
@@ -422,9 +304,98 @@ function getContext2D(element: HTMLCanvasElement): CanvasRenderingContext2D {
   return context;
 }
 
+function readRenderStyleTokens(): RenderStyleTokens {
+  return {
+    soilColor: readCssVar('--soil', '#8f6b43'),
+    flowLineColor: readCssVar('--flow-line', '#0000ff'),
+    equipotentialColor: readCssVar('--equipotential', '#ff0000'),
+    phreaticColor: readCssVar('--phreatic', '#1d4ed8'),
+    noFlowColor: readCssVar('--no-flow', '#ffffff'),
+    flowLineWidth: readCssVarNumber('--flow-line-width', 2.4),
+    equipotentialWidth: readCssVarNumber('--equipotential-width', 2.8),
+  };
+}
+
+function readCssVar(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function readCssVarNumber(name: string, fallback: number): number {
+  const value = readCssVar(name, '');
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function initializeExamplesAndSolve(): Promise<void> {
+  try {
+    examplePresets = await loadExamplePresets();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    statusText.textContent = `Failed to load example presets: ${message}`;
+    render();
+    return;
+  }
+
+  if (examplePresets.length === 0) {
+    statusText.textContent = 'No example presets were loaded.';
+    render();
+    return;
+  }
+
+  initExamplePicker();
+  const requested = getRequestedExampleFromUrl();
+  const initialExampleId =
+    requested && examplePresets.some((preset) => preset.id === requested) ? requested : DEFAULT_EXAMPLE_ID;
+  const resolvedExampleId =
+    examplePresets.some((preset) => preset.id === initialExampleId) ? initialExampleId : examplePresets[0].id;
+  loadExampleById(resolvedExampleId, { updateUrl: false, solve: false });
+  solveAndRender();
+}
+
+async function loadExamplePresets(): Promise<ExamplePreset[]> {
+  const response = await fetch(`${import.meta.env.BASE_URL}example-presets.json`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as unknown;
+  if (!Array.isArray(data)) {
+    throw new Error('Presets file must contain an array.');
+  }
+
+  return data.map((presetRaw, index) => {
+    if (!presetRaw || typeof presetRaw !== 'object') {
+      throw new Error(`Preset #${index + 1} is not an object.`);
+    }
+    const preset = presetRaw as ExamplePreset;
+    if (!preset.id || !preset.label || !preset.summary) {
+      throw new Error(`Preset #${index + 1} is missing id/label/summary.`);
+    }
+    if (!Array.isArray(preset.lines) || !preset.domain || !preset.solver || !preset.view) {
+      throw new Error(`Preset "${preset.id}" is missing required sections.`);
+    }
+    preset.lines.forEach((line, lineIndex) => {
+      if (!Array.isArray(line.vertices) || line.vertices.length < 2) {
+        throw new Error(`Preset "${preset.id}" line #${lineIndex + 1} needs at least 2 vertices.`);
+      }
+    });
+    return {
+      ...preset,
+      view: {
+        ...preset.view,
+        showHeadMap: Boolean(preset.view.showHeadMap),
+      },
+    };
+  });
+}
+
 function initExamplePicker(): void {
   exampleSelect.innerHTML = '';
-  EXAMPLE_PRESETS.forEach((preset) => {
+  examplePresets.forEach((preset) => {
     const option = document.createElement('option');
     option.value = preset.id;
     option.textContent = preset.label;
@@ -444,14 +415,14 @@ function getRequestedExampleFromUrl(): string | null {
   if (!requested) {
     return null;
   }
-  return EXAMPLE_PRESETS.some((preset) => preset.id === requested) ? requested : null;
+  return examplePresets.some((preset) => preset.id === requested) ? requested : null;
 }
 
 function loadExampleById(
   presetId: string,
   options?: { updateUrl?: boolean; solve?: boolean },
 ): void {
-  const preset = EXAMPLE_PRESETS.find((item) => item.id === presetId);
+  const preset = examplePresets.find((item) => item.id === presetId);
   if (!preset) {
     return;
   }
@@ -480,7 +451,8 @@ function loadExampleById(
   state.nextId = 1;
 
   preset.lines.forEach((line) => {
-    addBoundary(line.kind, line.p1, line.p2, line.head ?? 0);
+    const lineHead = line.head ?? 0;
+    addBoundaryFromVertices(line.kind, line.vertices, lineHead);
   });
 
   (preset.polygons ?? []).forEach((polygon) => {
@@ -502,6 +474,7 @@ function loadExampleById(
   contoursInput.value = String(state.view.contours);
   streamlinesInput.value = String(state.view.streamlines);
   coordModeSelect.value = state.view.coordinateMode;
+  showHeadMapInput.checked = state.view.showHeadMap;
   autoSolveInput.checked = state.view.autoSolve;
   exampleSelect.value = preset.id;
 
@@ -525,7 +498,7 @@ function setExampleInUrl(presetId: string): void {
 }
 
 function updateExampleSummary(): void {
-  const preset = EXAMPLE_PRESETS.find((item) => item.id === exampleSelect.value);
+  const preset = examplePresets.find((item) => item.id === exampleSelect.value);
   if (!preset) {
     exampleSummary.textContent = '';
     return;
@@ -567,6 +540,11 @@ function wireControls(): void {
   coordModeSelect.addEventListener('change', () => {
     state.view.coordinateMode = coordModeSelect.value === 'transformed' ? 'transformed' : 'real';
     updateGuidanceUI();
+    render();
+  });
+
+  showHeadMapInput.addEventListener('change', () => {
+    state.view.showHeadMap = showHeadMapInput.checked;
     render();
   });
 
@@ -688,12 +666,11 @@ function readInputsIntoState(): void {
     const heightScale = state.domain.height / oldHeight;
 
     state.lineBoundaries.forEach((line) => {
-      line.p1.x *= widthScale;
-      line.p2.x *= widthScale;
-      line.p1.y *= heightScale;
-      line.p2.y *= heightScale;
-      line.p1 = clampPoint(line.p1);
-      line.p2 = clampPoint(line.p2);
+      const scaledVertices = getLineVertices(line).map((vertex) => ({
+        x: vertex.x * widthScale,
+        y: vertex.y * heightScale,
+      }));
+      setLineVertices(line, scaledVertices);
     });
 
     state.polygons.forEach((polygon) => {
@@ -867,15 +844,40 @@ function setTool(tool: Tool): void {
   updateCanvasCursor();
 }
 
-function addBoundary(kind: LineKind, p1: Point, p2: Point, head: number): void {
+function addBoundaryFromVertices(kind: LineKind, vertices: Point[], head: number): void {
+  const normalizedVertices = normalizeLineVertices(vertices.map((vertex) => clampPoint(vertex)));
+  if (normalizedVertices.length < 2) {
+    return;
+  }
   state.lineBoundaries.push({
     id: state.nextId,
     kind,
-    p1: clampPoint({ ...p1 }),
-    p2: clampPoint({ ...p2 }),
+    vertices: normalizedVertices,
     head,
   });
   state.nextId += 1;
+}
+
+function getLineVertices(line: LineBoundary): Point[] {
+  return line.vertices;
+}
+
+function setLineVertices(line: LineBoundary, vertices: Point[]): void {
+  const normalizedVertices = normalizeLineVertices(vertices.map((vertex) => clampPoint(vertex)));
+  if (normalizedVertices.length < 2) {
+    return;
+  }
+  line.vertices = normalizedVertices;
+}
+
+function normalizeLineVertices(vertices: Point[]): Point[] {
+  const result: Point[] = [];
+  vertices.forEach((vertex) => {
+    if (result.length === 0 || distance(result[result.length - 1], vertex) > 1e-9) {
+      result.push({ ...vertex });
+    }
+  });
+  return result;
 }
 
 function onPointerDown(event: PointerEvent): void {
@@ -968,7 +970,7 @@ function onPointerDown(event: PointerEvent): void {
     }
 
     const lineHead = mapped === 'equipotential' ? readNumber(newHeadInput, 8, -200, 200) : 0;
-    addBoundary(mapped, start, end, lineHead);
+    addBoundaryFromVertices(mapped, [start, end], lineHead);
     state.selected = { kind: 'line', id: state.nextId - 1 };
     updateSelectionPanel();
     scheduleSolve();
@@ -1013,13 +1015,18 @@ function onPointerMove(event: PointerEvent): void {
     state.previewPoint = point;
   }
 
-  if (state.drag.type === 'line-end') {
+  if (state.drag.type === 'line-vertex') {
     const drag = state.drag;
     const line = state.lineBoundaries.find((item) => item.id === drag.id);
     if (!line) {
       return;
     }
-    line[drag.endpoint] = clampPoint(point);
+    const vertices = getLineVertices(line).map((vertex) => ({ ...vertex }));
+    if (drag.vertexIndex < 0 || drag.vertexIndex >= vertices.length) {
+      return;
+    }
+    vertices[drag.vertexIndex] = clampPoint(point);
+    setLineVertices(line, vertices);
     scheduleSolve();
     render();
     updateCanvasCursor(point);
@@ -1035,16 +1042,20 @@ function onPointerMove(event: PointerEvent): void {
     const dxRaw = point.x - drag.startPointer.x;
     const dyRaw = point.y - drag.startPointer.y;
 
-    const minX = Math.min(drag.startP1.x, drag.startP2.x);
-    const maxX = Math.max(drag.startP1.x, drag.startP2.x);
-    const minY = Math.min(drag.startP1.y, drag.startP2.y);
-    const maxY = Math.max(drag.startP1.y, drag.startP2.y);
+    const startBounds = polygonBoundsFromVertices(drag.startVertices);
+    const minX = startBounds.minX;
+    const maxX = startBounds.maxX;
+    const minY = startBounds.minY;
+    const maxY = startBounds.maxY;
 
     const dx = clamp(dxRaw, -minX, state.domain.width - maxX);
     const dy = clamp(dyRaw, -minY, state.domain.height - maxY);
 
-    line.p1 = { x: drag.startP1.x + dx, y: drag.startP1.y + dy };
-    line.p2 = { x: drag.startP2.x + dx, y: drag.startP2.y + dy };
+    const movedVertices = drag.startVertices.map((vertex) => ({
+      x: vertex.x + dx,
+      y: vertex.y + dy,
+    }));
+    setLineVertices(line, movedVertices);
     scheduleSolve();
     render();
     updateCanvasCursor(point);
@@ -1217,48 +1228,84 @@ function rectangleVerticesFromDrag(start: Point, end: Point): Point[] | null {
 }
 
 function startSelectionDrag(point: Point, event: PointerEvent): void {
-  const endpointHit = findLineEndpoint(point);
-  if (endpointHit) {
-    state.selected = { kind: 'line', id: endpointHit.id };
-    state.drag = {
-      type: 'line-end',
-      id: endpointHit.id,
-      endpoint: endpointHit.endpoint,
-    };
+  const hasModifier = event.altKey || event.ctrlKey || event.metaKey;
+
+  if (hasModifier && state.selected) {
+    if (state.selected.kind === 'line') {
+      const selectedLine = state.lineBoundaries.find((line) => line.id === state.selected?.id);
+      if (!selectedLine) {
+        return;
+      }
+      if (event.altKey) {
+        const edgeHit = findLineEdge(point, selectedLine.id);
+        if (!edgeHit) {
+          return;
+        }
+        const vertices = getLineVertices(selectedLine).map((vertex) => ({ ...vertex }));
+        const insertIndex = edgeHit.edgeIndex + 1;
+        vertices.splice(insertIndex, 0, edgeHit.projection);
+        setLineVertices(selectedLine, vertices);
+        state.drag = { type: 'line-vertex', id: selectedLine.id, vertexIndex: insertIndex };
+        updateSelectionPanel();
+        scheduleSolve();
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) {
+        const vertexHit = findLineVertex(point, selectedLine.id);
+        const vertices = getLineVertices(selectedLine);
+        if (!vertexHit || vertices.length <= 2) {
+          return;
+        }
+        const next = vertices.map((vertex) => ({ ...vertex }));
+        next.splice(vertexHit.vertexIndex, 1);
+        setLineVertices(selectedLine, next);
+        updateSelectionPanel();
+        scheduleSolve();
+        render();
+        return;
+      }
+      return;
+    }
+
+    const selectedPolygon = state.polygons.find((polygon) => polygon.id === state.selected?.id);
+    if (!selectedPolygon) {
+      return;
+    }
+    if (event.altKey) {
+      const edgeHit = findPolygonEdge(point, selectedPolygon.id);
+      if (!edgeHit) {
+        return;
+      }
+      const insertIndex = edgeHit.edgeIndex + 1;
+      selectedPolygon.vertices.splice(insertIndex, 0, edgeHit.projection);
+      state.drag = { type: 'polygon-vertex', id: selectedPolygon.id, vertexIndex: insertIndex };
+      updateSelectionPanel();
+      scheduleSolve();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      const vertexHit = findPolygonVertex(point, selectedPolygon.id);
+      if (!vertexHit || selectedPolygon.vertices.length <= 3) {
+        return;
+      }
+      selectedPolygon.vertices.splice(vertexHit.vertexIndex, 1);
+      updateSelectionPanel();
+      scheduleSolve();
+      render();
+      return;
+    }
+    return;
+  }
+
+  const lineVertexHit = findLineVertex(point);
+  if (lineVertexHit) {
+    state.selected = { kind: 'line', id: lineVertexHit.id };
+    state.drag = { type: 'line-vertex', id: lineVertexHit.id, vertexIndex: lineVertexHit.vertexIndex };
     updateSelectionPanel();
     return;
   }
 
   const vertexHit = findPolygonVertex(point);
-  const edgeHit = findPolygonEdge(point);
-  const polygonHit = findPolygon(point);
-
-  if ((event.ctrlKey || event.metaKey) && vertexHit) {
-    const polygon = state.polygons.find((item) => item.id === vertexHit.id);
-    if (polygon && polygon.vertices.length > 3) {
-      polygon.vertices.splice(vertexHit.vertexIndex, 1);
-      state.selected = { kind: 'polygon', id: polygon.id };
-      updateSelectionPanel();
-      scheduleSolve();
-    }
-    render();
-    return;
-  }
-
-  if (event.altKey && edgeHit) {
-    const polygon = state.polygons.find((item) => item.id === edgeHit.id);
-    if (!polygon) {
-      return;
-    }
-    const insertIndex = edgeHit.edgeIndex + 1;
-    polygon.vertices.splice(insertIndex, 0, edgeHit.projection);
-    state.selected = { kind: 'polygon', id: polygon.id };
-    state.drag = { type: 'polygon-vertex', id: polygon.id, vertexIndex: insertIndex };
-    updateSelectionPanel();
-    scheduleSolve();
-    return;
-  }
-
   if (vertexHit) {
     state.selected = { kind: 'polygon', id: vertexHit.id };
     state.drag = { type: 'polygon-vertex', id: vertexHit.id, vertexIndex: vertexHit.vertexIndex };
@@ -1266,6 +1313,7 @@ function startSelectionDrag(point: Point, event: PointerEvent): void {
     return;
   }
 
+  const polygonHit = findPolygon(point);
   if (polygonHit) {
     state.selected = { kind: 'polygon', id: polygonHit.id };
     state.drag = {
@@ -1285,8 +1333,7 @@ function startSelectionDrag(point: Point, event: PointerEvent): void {
       type: 'line-move',
       id: lineHit.id,
       startPointer: point,
-      startP1: { ...lineHit.p1 },
-      startP2: { ...lineHit.p2 },
+      startVertices: getLineVertices(lineHit).map((vertex) => ({ ...vertex })),
     };
     updateSelectionPanel();
     return;
@@ -1297,24 +1344,68 @@ function startSelectionDrag(point: Point, event: PointerEvent): void {
   updateSelectionPanel();
 }
 
-function findLineEndpoint(point: Point): { id: number; endpoint: 'p1' | 'p2' } | null {
-  const threshold = pointerWorldThreshold();
-  for (let index = state.lineBoundaries.length - 1; index >= 0; index -= 1) {
-    const line = state.lineBoundaries[index];
-    if (distance(point, line.p1) <= threshold) {
-      return { id: line.id, endpoint: 'p1' };
+function findLineVertex(point: Point, lineId?: number): { id: number; vertexIndex: number } | null {
+  const threshold = 1.1 * pointerWorldThreshold();
+  for (let lineIndex = state.lineBoundaries.length - 1; lineIndex >= 0; lineIndex -= 1) {
+    const line = state.lineBoundaries[lineIndex];
+    if (typeof lineId === 'number' && line.id !== lineId) {
+      continue;
     }
-    if (distance(point, line.p2) <= threshold) {
-      return { id: line.id, endpoint: 'p2' };
+    const vertices = getLineVertices(line);
+    for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 1) {
+      if (distance(point, vertices[vertexIndex]) <= threshold) {
+        return { id: line.id, vertexIndex };
+      }
     }
   }
   return null;
 }
 
-function findPolygonVertex(point: Point): { id: number; vertexIndex: number } | null {
+function findLineEdge(point: Point, lineId?: number): { id: number; edgeIndex: number; projection: Point } | null {
+  const threshold = 1.1 * pointerWorldThreshold();
+  for (let lineIndex = state.lineBoundaries.length - 1; lineIndex >= 0; lineIndex -= 1) {
+    const line = state.lineBoundaries[lineIndex];
+    if (typeof lineId === 'number' && line.id !== lineId) {
+      continue;
+    }
+    const vertices = getLineVertices(line);
+    if (vertices.length < 2) {
+      continue;
+    }
+
+    let bestDist = Number.POSITIVE_INFINITY;
+    let bestIndex = -1;
+    let bestProjection: Point | null = null;
+    for (let i = 0; i < vertices.length - 1; i += 1) {
+      const a = vertices[i];
+      const b = vertices[i + 1];
+      const projection = projectPointToSegment(point, a, b);
+      const dist = distance(point, projection);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = i;
+        bestProjection = projection;
+      }
+    }
+
+    if (bestProjection && bestDist <= threshold) {
+      return {
+        id: line.id,
+        edgeIndex: bestIndex,
+        projection: clampPoint(bestProjection),
+      };
+    }
+  }
+  return null;
+}
+
+function findPolygonVertex(point: Point, polygonId?: number): { id: number; vertexIndex: number } | null {
   const threshold = 1.1 * pointerWorldThreshold();
   for (let polygonIndex = state.polygons.length - 1; polygonIndex >= 0; polygonIndex -= 1) {
     const polygon = state.polygons[polygonIndex];
+    if (typeof polygonId === 'number' && polygon.id !== polygonId) {
+      continue;
+    }
     for (let vertexIndex = 0; vertexIndex < polygon.vertices.length; vertexIndex += 1) {
       if (distance(point, polygon.vertices[vertexIndex]) <= threshold) {
         return { id: polygon.id, vertexIndex };
@@ -1324,10 +1415,13 @@ function findPolygonVertex(point: Point): { id: number; vertexIndex: number } | 
   return null;
 }
 
-function findPolygonEdge(point: Point): { id: number; edgeIndex: number; projection: Point } | null {
+function findPolygonEdge(point: Point, polygonId?: number): { id: number; edgeIndex: number; projection: Point } | null {
   const threshold = 1.1 * pointerWorldThreshold();
   for (let polygonIndex = state.polygons.length - 1; polygonIndex >= 0; polygonIndex -= 1) {
     const polygon = state.polygons[polygonIndex];
+    if (typeof polygonId === 'number' && polygon.id !== polygonId) {
+      continue;
+    }
     if (polygon.vertices.length < 2) {
       continue;
     }
@@ -1372,7 +1466,15 @@ function findLine(point: Point): LineBoundary | null {
   const threshold = pointerWorldThreshold();
   for (let index = state.lineBoundaries.length - 1; index >= 0; index -= 1) {
     const line = state.lineBoundaries[index];
-    if (distancePointToSegment(point, line.p1, line.p2) <= threshold) {
+    const vertices = getLineVertices(line);
+    let hit = false;
+    for (let i = 0; i < vertices.length - 1; i += 1) {
+      if (distancePointToSegment(point, vertices[i], vertices[i + 1]) <= threshold) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) {
       return line;
     }
   }
@@ -1389,26 +1491,45 @@ function updateCanvasCursor(point = state.hoverPoint): void {
   let cursor = 'default';
   let mode = 'default';
   const hasPoint = point !== null;
+  const selectedLineId = state.selected?.kind === 'line' ? state.selected.id : null;
+  const selectedPolygonId = state.selected?.kind === 'polygon' ? state.selected.id : null;
 
   if (state.camera.panMode) {
     cursor = state.drag.type === 'pan' ? 'grabbing' : 'grab';
     mode = state.drag.type === 'pan' ? 'pan-drag' : 'pan';
   } else if (state.tool === 'select') {
     if (
-      state.drag.type === 'line-end' ||
+      state.drag.type === 'line-vertex' ||
       state.drag.type === 'line-move' ||
       state.drag.type === 'polygon-move' ||
       state.drag.type === 'polygon-vertex'
     ) {
       cursor = 'grabbing';
       mode = 'dragging';
-    } else if (hasPoint && (state.modifiers.ctrl || state.modifiers.meta) && findPolygonVertex(point)) {
+    } else if (
+      hasPoint &&
+      (state.modifiers.ctrl || state.modifiers.meta) &&
+      ((selectedLineId !== null &&
+        findLineVertex(point, selectedLineId) &&
+        (() => {
+          const line = state.lineBoundaries.find((item) => item.id === selectedLineId);
+          return line ? getLineVertices(line).length > 2 : false;
+        })()) ||
+        (selectedPolygonId !== null &&
+          findPolygonVertex(point, selectedPolygonId) &&
+          (state.polygons.find((polygon) => polygon.id === selectedPolygonId)?.vertices.length ?? 3) > 3))
+    ) {
       cursor = CURSOR_MINUS;
       mode = 'minus';
-    } else if (hasPoint && state.modifiers.alt && findPolygonEdge(point)) {
+    } else if (
+      hasPoint &&
+      state.modifiers.alt &&
+      ((selectedLineId !== null && findLineEdge(point, selectedLineId)) ||
+        (selectedPolygonId !== null && findPolygonEdge(point, selectedPolygonId)))
+    ) {
       cursor = CURSOR_PLUS;
       mode = 'plus';
-    } else if (hasPoint && (findPolygonVertex(point) || findLineEndpoint(point))) {
+    } else if (hasPoint && (findPolygonVertex(point) || findLineVertex(point))) {
       cursor = 'grab';
       mode = 'handle';
     } else if (hasPoint && (findPolygon(point) || findLine(point))) {
@@ -1423,8 +1544,23 @@ function updateCanvasCursor(point = state.hoverPoint): void {
     mode = 'draw';
   }
 
+  updateCursorReadout(point);
   canvas.style.cursor = cursor;
   canvas.dataset.cursorMode = mode;
+}
+
+function updateCursorReadout(point = state.hoverPoint): void {
+  const transformed = transformedCoordinatesActive();
+  const xLabel = transformed ? "x'" : 'x';
+  const yLabel = transformed ? "y'" : 'y';
+
+  if (!point) {
+    cursorReadout.textContent = `${xLabel}: -, ${yLabel}: -`;
+    return;
+  }
+
+  const displayPoint = mapPointToDisplay(point);
+  cursorReadout.textContent = `${xLabel}: ${displayPoint.x.toFixed(2)}, ${yLabel}: ${displayPoint.y.toFixed(2)}`;
 }
 
 function pointerWorldThreshold(): number {
@@ -1535,7 +1671,7 @@ function updateGuidanceUI(): void {
     stepText = 'Pan mode: drag the canvas to move view. Use + / - (or wheel) to zoom, then Fit to reset.';
   } else if (state.tool === 'select') {
     stepText =
-      'Step: click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge to add a vertex; Ctrl/Cmd+click a vertex to delete.';
+      'Step: click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge of the selected item to add a vertex; Ctrl/Cmd+click a vertex of the selected item to delete.';
   } else if (state.tool === 'equipotential' || state.tool === 'phreatic' || state.tool === 'noflow-line') {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
@@ -1705,7 +1841,7 @@ function solveGroundwater(
   const noFlowMask = Array.from({ length: ny }, () => Array.from({ length: nx }, () => false));
 
   noFlowLines.forEach((line) => {
-    const nodes = rasterizeLineNodes(line.p1, line.p2, domain, solver, noFlowPaddingCells);
+    const nodes = rasterizeBoundaryLineNodes(line, domain, solver, noFlowPaddingCells);
     nodes.forEach(({ i, j }) => {
       noFlowMask[j][i] = true;
     });
@@ -1733,13 +1869,14 @@ function solveGroundwater(
   let fixedHeadSum = 0;
 
   fixedLines.forEach((line) => {
-    const nodes = rasterizeLineNodes(line.p1, line.p2, domain, solver, 0);
+    const lineVertices = getLineVertices(line);
+    const nodes = rasterizeBoundaryLineNodes(line, domain, solver, 0);
     nodes.forEach(({ i, j }) => {
       if (!active[j][i]) {
         return;
       }
       const point = { x: i * dx, y: j * dy };
-      const projection = projectPointToSegment(point, line.p1, line.p2);
+      const projection = projectPointToPolyline(point, lineVertices);
       const value = line.kind === 'equipotential' ? line.head : projection.y;
       if (!dirichlet[j][i]) {
         dirichletCount += 1;
@@ -2092,10 +2229,7 @@ function buildSeeds(
   for (let idx = 1; idx <= count; idx += 1) {
     const t = idx / (count + 1);
     const base = seedLine !== null
-      ? {
-          x: seedLine.p1.x + (seedLine.p2.x - seedLine.p1.x) * t,
-          y: seedLine.p1.y + (seedLine.p2.y - seedLine.p1.y) * t,
-        }
+      ? samplePointOnPolyline(getLineVertices(seedLine), t)
       : { x: 0, y: t * domain.height };
 
     const towardCenter = normalize({ x: center.x - base.x, y: center.y - base.y });
@@ -2293,6 +2427,7 @@ function render(): void {
   const view = getCanvasView();
   const viewport = view.viewport;
   updateCanvasPrompt(view);
+  updateCursorReadout();
 
   ctx.clearRect(0, 0, rect.width, rect.height);
 
@@ -2302,7 +2437,7 @@ function render(): void {
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, rect.width, rect.height);
 
-  ctx.fillStyle = '#fefcf6';
+  ctx.fillStyle = RENDER_STYLE.soilColor;
   ctx.fillRect(viewport.left, viewport.top, viewport.width, viewport.height);
 
   ctx.save();
@@ -2311,7 +2446,9 @@ function render(): void {
   ctx.clip();
 
   if (state.solution) {
-    drawHeadShading(view, state.solution);
+    if (state.view.showHeadMap) {
+      drawHeadShading(view, state.solution);
+    }
     drawContourSegments(view, state.solution);
     drawStreamPaths(view, state.solution.streamPaths);
   }
@@ -2324,6 +2461,9 @@ function render(): void {
   ctx.restore();
 
   drawDomainOutline(view);
+  if (state.solution && state.view.showHeadMap) {
+    drawHeadColorbar(view, state.solution);
+  }
   drawSelectionHandles(view);
 }
 
@@ -2351,9 +2491,19 @@ function drawDomainOutline(view: CanvasView): void {
   const xMin = displayBounds.xMin.toFixed(1);
   const xMax = (displayBounds.xMin + displayBounds.width).toFixed(1);
   const yMax = (displayBounds.yMin + displayBounds.height).toFixed(1);
-  ctx.fillText(xMin, viewport.left - 10, viewport.top + viewport.height + 14);
-  ctx.fillText(`${xMax}${xSuffix}`, viewport.left + viewport.width - 54, viewport.top + viewport.height + 14);
-  ctx.fillText(`${yMax}${ySuffix}`, viewport.left - 40, viewport.top + 10);
+  const axisY = viewport.top + viewport.height + 5;
+
+  ctx.save();
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillText(xMin, viewport.left + 2, axisY);
+
+  ctx.textAlign = 'right';
+  ctx.fillText(`${xMax}${xSuffix}`, viewport.left + viewport.width - 2, axisY);
+
+  ctx.textAlign = 'left';
+  ctx.fillText(`${yMax}${ySuffix}`, viewport.left + 4, viewport.top + 2);
+  ctx.restore();
 }
 
 function drawHeadShading(view: CanvasView, solution: Solution): void {
@@ -2398,16 +2548,13 @@ function drawContourSegments(view: CanvasView, solution: Solution): void {
     return;
   }
 
-  const minLevel = solution.contourLevels[0];
-  const maxLevel = solution.contourLevels[solution.contourLevels.length - 1];
+  ctx.strokeStyle = RENDER_STYLE.equipotentialColor;
+  ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
+  ctx.lineCap = 'round';
 
   solution.contourSegments.forEach((segment) => {
     const a = worldToScreen(segment.a, view);
     const b = worldToScreen(segment.b, view);
-    const levelT = maxLevel > minLevel ? (segment.level - minLevel) / (maxLevel - minLevel) : 0.5;
-    const shade = Math.round(30 + 80 * levelT);
-    ctx.strokeStyle = `rgb(${shade}, ${shade + 10}, ${shade + 20})`;
-    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -2416,8 +2563,10 @@ function drawContourSegments(view: CanvasView, solution: Solution): void {
 }
 
 function drawStreamPaths(view: CanvasView, lines: Point[][]): void {
-  ctx.strokeStyle = '#066f74';
-  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = RENDER_STYLE.flowLineColor;
+  ctx.lineWidth = RENDER_STYLE.flowLineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   lines.forEach((line) => {
     if (line.length < 2) {
       return;
@@ -2445,9 +2594,9 @@ function drawNoFlowPolygons(view: CanvasView): void {
       ctx.lineTo(screenVertices[idx].x, screenVertices[idx].y);
     }
     ctx.closePath();
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.18)';
+    ctx.fillStyle = RENDER_STYLE.noFlowColor;
     ctx.fill();
-    ctx.strokeStyle = '#1e293b';
+    ctx.strokeStyle = RENDER_STYLE.noFlowColor;
     ctx.lineWidth = 1.2;
     ctx.stroke();
   });
@@ -2455,30 +2604,36 @@ function drawNoFlowPolygons(view: CanvasView): void {
 
 function drawBoundaries(view: CanvasView): void {
   state.lineBoundaries.forEach((line) => {
-    const a = worldToScreen(line.p1, view);
-    const b = worldToScreen(line.p2, view);
+    const lineVertices = getLineVertices(line);
+    if (lineVertices.length < 2) {
+      return;
+    }
 
     if (line.kind === 'equipotential') {
       ctx.setLineDash([]);
-      ctx.strokeStyle = '#c62828';
-      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = RENDER_STYLE.equipotentialColor;
+      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
     } else if (line.kind === 'phreatic') {
       ctx.setLineDash([7, 5]);
-      ctx.strokeStyle = '#1d4ed8';
+      ctx.strokeStyle = RENDER_STYLE.phreaticColor;
       ctx.lineWidth = 2.2;
     } else {
       ctx.setLineDash([]);
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = RENDER_STYLE.noFlowColor;
       ctx.lineWidth = 3;
     }
 
+    const first = worldToScreen(lineVertices[0], view);
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < lineVertices.length; i += 1) {
+      const point = worldToScreen(lineVertices[i], view);
+      ctx.lineTo(point.x, point.y);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const mid = { x: 0.5 * (a.x + b.x), y: 0.5 * (a.y + b.y) };
+    const mid = worldToScreen(samplePointOnPolyline(lineVertices, 0.5), view);
     ctx.fillStyle = '#111827';
     ctx.font = '11px "Trebuchet MS", "Gill Sans", sans-serif';
 
@@ -2490,6 +2645,44 @@ function drawBoundaries(view: CanvasView): void {
       ctx.fillText('No-flow', mid.x + 6, mid.y - 6);
     }
   });
+}
+
+function drawHeadColorbar(view: CanvasView, solution: Solution): void {
+  const { minHead, maxHead } = solution;
+  if (maxHead - minHead < 1e-9) {
+    return;
+  }
+
+  const barWidth = 14;
+  const barHeight = Math.max(110, Math.min(180, Math.round(view.viewport.height * 0.42)));
+  const x = view.viewport.left + view.viewport.width - barWidth - 14;
+  const y = view.viewport.top + 16;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.62)';
+  ctx.fillRect(x - 24, y - 12, 86, barHeight + 24);
+
+  const gradient = ctx.createLinearGradient(0, y + barHeight, 0, y);
+  gradient.addColorStop(0, headColor(minHead, minHead, maxHead));
+  gradient.addColorStop(0.5, headColor(0.5 * (minHead + maxHead), minHead, maxHead));
+  gradient.addColorStop(1, headColor(maxHead, minHead, maxHead));
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, barWidth, barHeight);
+
+  ctx.strokeStyle = 'rgba(248, 250, 252, 0.95)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, barWidth, barHeight);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = '11px "Trebuchet MS", "Gill Sans", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${maxHead.toFixed(2)} m`, x + barWidth + 7, y + 1);
+  ctx.fillText(`${(0.5 * (maxHead + minHead)).toFixed(2)} m`, x + barWidth + 7, y + 0.5 * barHeight);
+  ctx.fillText(`${minHead.toFixed(2)} m`, x + barWidth + 7, y + barHeight - 1);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('Head', x - 2, y - 4);
+  ctx.restore();
 }
 
 function drawPendingShape(view: CanvasView): void {
@@ -2575,15 +2768,21 @@ function drawSelection(view: CanvasView): void {
       return;
     }
 
-    const a = worldToScreen(line.p1, view);
-    const b = worldToScreen(line.p2, view);
+    const lineVertices = getLineVertices(line);
+    if (lineVertices.length < 2) {
+      return;
+    }
+    const first = worldToScreen(lineVertices[0], view);
 
     ctx.strokeStyle = '#f59e0b';
     ctx.lineWidth = 1.4;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < lineVertices.length; i += 1) {
+      const point = worldToScreen(lineVertices[i], view);
+      ctx.lineTo(point.x, point.y);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
     return;
@@ -2630,8 +2829,9 @@ function drawSelectionHandles(view: CanvasView): void {
     if (!line) {
       return;
     }
-    drawHandle(worldToScreen(line.p1, view));
-    drawHandle(worldToScreen(line.p2, view));
+    getLineVertices(line).forEach((vertex) => {
+      drawHandle(worldToScreen(vertex, view));
+    });
     return;
   }
 
@@ -2792,8 +2992,7 @@ function exportStateJson(): void {
     lineBoundaries: state.lineBoundaries.map((line) => ({
       id: line.id,
       kind: line.kind,
-      p1: { ...line.p1 },
-      p2: { ...line.p2 },
+      vertices: getLineVertices(line).map((vertex) => ({ ...vertex })),
       head: line.head,
     })),
     polygons: state.polygons.map((polygon) => ({
@@ -2860,6 +3059,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
     streamlines: readInteger(viewRecord.streamlines, 'view.streamlines', 4, 36),
     autoSolve: readBoolean(viewRecord.autoSolve, 'view.autoSolve'),
     coordinateMode,
+    showHeadMap: readOptionalBoolean(viewRecord.showHeadMap, false, 'view.showHeadMap'),
   };
 
   const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
@@ -2899,8 +3099,7 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.lineBoundaries = imported.lineBoundaries.map((line) => ({
     id: line.id,
     kind: line.kind,
-    p1: clampPoint(line.p1),
-    p2: clampPoint(line.p2),
+    vertices: normalizeLineVertices(line.vertices.map((vertex) => clampPoint(vertex))),
     head: line.head,
   }));
   state.polygons = imported.polygons.map((polygon) => ({
@@ -2924,6 +3123,7 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   contoursInput.value = String(state.view.contours);
   streamlinesInput.value = String(state.view.streamlines);
   coordModeSelect.value = state.view.coordinateMode;
+  showHeadMapInput.checked = state.view.showHeadMap;
   autoSolveInput.checked = state.view.autoSolve;
   newHeadInput.value = String(imported.newHead);
 
@@ -2951,13 +3151,17 @@ function readLineBoundaries(value: unknown): LineBoundary[] {
   return value.map((entry, index) => {
     const record = asRecord(entry, `lineBoundaries[${index}]`);
     const kind = readLineKind(record.kind, `lineBoundaries[${index}].kind`);
-    const p1 = readPoint(record.p1, `lineBoundaries[${index}].p1`);
-    const p2 = readPoint(record.p2, `lineBoundaries[${index}].p2`);
+    if (!Array.isArray(record.vertices) || record.vertices.length < 2) {
+      throw new Error(`lineBoundaries[${index}].vertices must contain at least 2 points.`);
+    }
+    const vertices = record.vertices.map((vertex, vertexIndex) =>
+      readPoint(vertex, `lineBoundaries[${index}].vertices[${vertexIndex}]`),
+    );
     const id = readInteger(record.id, `lineBoundaries[${index}].id`, 1, 1_000_000);
     const head = kind === 'equipotential'
       ? readNumberValue(record.head, `lineBoundaries[${index}].head`, -200, 200)
       : 0;
-    return { id, kind, p1, p2, head };
+    return { id, kind, vertices, head };
   });
 }
 
@@ -3007,6 +3211,13 @@ function readBoolean(value: unknown, label: string): boolean {
   return value;
 }
 
+function readOptionalBoolean(value: unknown, fallback: boolean, label: string): boolean {
+  if (typeof value === 'undefined') {
+    return fallback;
+  }
+  return readBoolean(value, label);
+}
+
 function readInteger(value: unknown, label: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`${label} must be a number.`);
@@ -3044,6 +3255,85 @@ function projectPointToSegment(point: Point, a: Point, b: Point): Point {
 function distancePointToSegment(point: Point, a: Point, b: Point): number {
   const projection = projectPointToSegment(point, a, b);
   return distance(point, projection);
+}
+
+function projectPointToPolyline(point: Point, vertices: Point[]): Point {
+  if (vertices.length < 2) {
+    return vertices[0] ? { ...vertices[0] } : { ...point };
+  }
+  let best = projectPointToSegment(point, vertices[0], vertices[1]);
+  let bestDist = distance(point, best);
+  for (let i = 1; i < vertices.length - 1; i += 1) {
+    const candidate = projectPointToSegment(point, vertices[i], vertices[i + 1]);
+    const dist = distance(point, candidate);
+    if (dist < bestDist) {
+      best = candidate;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function samplePointOnPolyline(vertices: Point[], t: number): Point {
+  if (vertices.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  if (vertices.length === 1) {
+    return { ...vertices[0] };
+  }
+  const clampedT = clamp(t, 0, 1);
+  const lengths: number[] = [];
+  let totalLength = 0;
+  for (let i = 0; i < vertices.length - 1; i += 1) {
+    const segmentLength = distance(vertices[i], vertices[i + 1]);
+    lengths.push(segmentLength);
+    totalLength += segmentLength;
+  }
+  if (totalLength < 1e-9) {
+    return { ...vertices[0] };
+  }
+  let target = clampedT * totalLength;
+  for (let i = 0; i < lengths.length; i += 1) {
+    const segLength = lengths[i];
+    if (target <= segLength || i === lengths.length - 1) {
+      const localT = segLength < 1e-9 ? 0 : target / segLength;
+      return {
+        x: vertices[i].x + (vertices[i + 1].x - vertices[i].x) * localT,
+        y: vertices[i].y + (vertices[i + 1].y - vertices[i].y) * localT,
+      };
+    }
+    target -= segLength;
+  }
+  return { ...vertices[vertices.length - 1] };
+}
+
+function rasterizeBoundaryLineNodes(
+  line: LineBoundary,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  paddingCells: number,
+): Array<{ i: number; j: number }> {
+  const vertices = getLineVertices(line);
+  if (vertices.length < 2) {
+    return [];
+  }
+  const nodes: Array<{ i: number; j: number }> = [];
+  const visited = new Set<string>();
+
+  for (let i = 0; i < vertices.length - 1; i += 1) {
+    const a = vertices[i];
+    const b = vertices[i + 1];
+    rasterizeLineNodes(a, b, domain, solver, paddingCells).forEach((node) => {
+      const key = `${node.i},${node.j}`;
+      if (visited.has(key)) {
+        return;
+      }
+      visited.add(key);
+      nodes.push(node);
+    });
+  }
+
+  return nodes;
 }
 
 function buildModifierCursor(kind: 'plus' | 'minus'): string {

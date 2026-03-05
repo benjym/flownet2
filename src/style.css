@@ -1,5 +1,5 @@
 :root {
-  font-family: "Trebuchet MS", "Gill Sans", "Avenir Next", sans-serif;
+  font-family: "Montserrat", "Trebuchet MS", "Gill Sans", "Avenir Next", sans-serif;
   line-height: 1.4;
   font-weight: 400;
   color: #102332;
@@ -17,6 +17,13 @@
   --accent: #0f766e;
   --accent-strong: #065f56;
   --danger: #b91c1c;
+  --flow-line: #0000ff;
+  --equipotential: #ff0000;
+  --phreatic: #1d4ed8;
+  --no-flow: #ffffff;
+  --soil: #8f6b43;
+  --flow-line-width: 2.4;
+  --equipotential-width: 2.8;
 }
 
 * {
@@ -308,8 +315,18 @@ button.danger {
 
 .canvas-toolbar p {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.8rem;
   color: #23465f;
+}
+
+.cursor-readout {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  color: #23465f;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .view-controls {
@@ -334,8 +351,9 @@ button.danger {
 
 #flowCanvas {
   width: 100%;
-  flex: 1;
-  min-height: 240px;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 0;
   display: block;
   touch-action: none;
 }
@@ -372,6 +390,12 @@ button.danger {
     font-size: 0.76rem;
     width: 100%;
     order: 2;
+  }
+
+  .cursor-readout {
+    width: 100%;
+    order: 3;
+    font-size: 0.75rem;
   }
 
   .view-controls {
