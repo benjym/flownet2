@@ -203,6 +203,7 @@ const selectedHeadRow = byId<HTMLLabelElement>('selectedHeadRow');
 const selectedHeadInput = byId<HTMLInputElement>('selectedHead');
 const toolHint = byId<HTMLParagraphElement>('toolHint');
 const toolStep = byId<HTMLParagraphElement>('toolStep');
+const newHeadWrap = byId<HTMLLabelElement>('newHeadWrap');
 const solveBtn = byId<HTMLButtonElement>('solveBtn');
 const exportBtn = byId<HTMLButtonElement>('exportBtn');
 const saveStateBtn = byId<HTMLButtonElement>('saveStateBtn');
@@ -223,6 +224,15 @@ const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
 
 const toolButtons = Array.from(toolRow.querySelectorAll<HTMLButtonElement>('button[data-tool]'));
+
+const TOOL_SHORTCUT_INFO: Record<Tool, { label: string; aria: string }> = {
+  select: { label: 'Space', aria: 'Space' },
+  equipotential: { label: 'E', aria: 'E' },
+  phreatic: { label: 'P', aria: 'P' },
+  'noflow-line': { label: 'F', aria: 'F' },
+  'noflow-zone': { label: 'I', aria: 'I' },
+  standpipe: { label: 'S', aria: 'S' },
+};
 
 const state = {
   domain: {
@@ -504,7 +514,7 @@ function updateExampleSummary(): void {
     exampleSummary.textContent = '';
     return;
   }
-  exampleSummary.textContent = `${preset.label}: ${preset.summary}`;
+  exampleSummary.textContent = preset.summary;
 }
 
 function wireControls(): void {
@@ -563,6 +573,12 @@ function wireControls(): void {
   });
 
   toolButtons.forEach((button) => {
+    const tool = button.dataset.tool as Tool | undefined;
+    if (tool) {
+      const shortcut = TOOL_SHORTCUT_INFO[tool];
+      button.title = `${button.textContent?.trim() ?? tool} (${shortcut.label})`;
+      button.setAttribute('aria-keyshortcuts', shortcut.aria);
+    }
     button.addEventListener('click', () => {
       const toolValue = button.dataset.tool;
       if (!toolValue) {
@@ -788,7 +804,42 @@ function onKeyDown(event: KeyboardEvent): void {
   if ((event.key === 'Delete' || event.key === 'Backspace') && !isTypingTarget(event.target)) {
     event.preventDefault();
     deleteSelected();
+    return;
   }
+
+  if (isTypingTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+
+  const shortcutTool = toolFromShortcut(event);
+  if (shortcutTool) {
+    event.preventDefault();
+    setTool(shortcutTool);
+  }
+}
+
+function toolFromShortcut(event: KeyboardEvent): Tool | null {
+  if (event.code === 'Space' || event.key === ' ') {
+    return 'select';
+  }
+
+  const key = event.key.toLowerCase();
+  if (key === 'e') {
+    return 'equipotential';
+  }
+  if (key === 'f') {
+    return 'noflow-line';
+  }
+  if (key === 'p') {
+    return 'phreatic';
+  }
+  if (key === 'i') {
+    return 'noflow-zone';
+  }
+  if (key === 's') {
+    return 'standpipe';
+  }
+  return null;
 }
 
 function onKeyUp(event: KeyboardEvent): void {
@@ -1677,6 +1728,7 @@ function updateGuidanceUI(): void {
     standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
   toolHint.textContent = hints[state.tool];
+  newHeadWrap.classList.toggle('is-hidden', state.tool !== 'equipotential');
 
   let stepText = '';
   if (state.camera.panMode) {

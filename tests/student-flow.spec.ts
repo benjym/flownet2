@@ -88,7 +88,7 @@ test.describe('Flow Net Studio student workflow', () => {
       inventorySummaryText(startingLines + 1, startingPolygons),
     );
 
-    await page.getByRole('button', { name: 'No-flow polygon' }).click();
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
     await page.mouse.move(point(0.42, 0.53).x, point(0.42, 0.53).y);
     await page.mouse.down();
     await page.mouse.move(point(0.58, 0.68).x, point(0.58, 0.68).y);
@@ -133,7 +133,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const click = (rx: number, ry: number) =>
       page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
 
-    await page.getByRole('button', { name: 'EP line' }).click();
+    await page.locator('#toolRow button[data-tool="equipotential"]').click();
     await expect(page.locator('#toolStep')).toContainText('Step 1 of 2');
     await click(0.2, 0.25);
     await expect(page.locator('#toolStep')).toContainText('Step 2 of 2');
@@ -227,6 +227,46 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.mouse.move(box.x - 20, box.y - 20);
     await expect(page.locator('#cursorReadout')).toHaveText('x: -, y: -');
+  });
+
+  test('tool buttons expose shortcut tooltips and keyboard shortcuts switch tools', async ({ page }) => {
+    await page.goto('/');
+
+    const selectTool = page.locator('#toolRow button[data-tool="select"]');
+    const epTool = page.locator('#toolRow button[data-tool="equipotential"]');
+    const flTool = page.locator('#toolRow button[data-tool="noflow-line"]');
+    const phreaticTool = page.locator('#toolRow button[data-tool="phreatic"]');
+    const impermeableAreaTool = page.locator('#toolRow button[data-tool="noflow-zone"]');
+    const standpipeTool = page.locator('#toolRow button[data-tool="standpipe"]');
+
+    await expect(selectTool).toHaveAttribute('title', /Space/);
+    await expect(epTool).toHaveAttribute('title', /\(E\)/);
+    await expect(flTool).toHaveAttribute('title', /\(F\)/);
+    await expect(phreaticTool).toHaveAttribute('title', /\(P\)/);
+    await expect(impermeableAreaTool).toHaveAttribute('title', /\(I\)/);
+    await expect(standpipeTool).toHaveAttribute('title', /\(S\)/);
+
+    await page.locator('#flowCanvas').click();
+
+    await page.keyboard.press('e');
+    await expect(epTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newHeadWrap')).not.toHaveClass(/is-hidden/);
+
+    await page.keyboard.press('f');
+    await expect(flTool).toHaveClass(/is-active/);
+
+    await page.keyboard.press('p');
+    await expect(phreaticTool).toHaveClass(/is-active/);
+
+    await page.keyboard.press('i');
+    await expect(impermeableAreaTool).toHaveClass(/is-active/);
+
+    await page.keyboard.press('s');
+    await expect(standpipeTool).toHaveClass(/is-active/);
+
+    await page.keyboard.press('Space');
+    await expect(selectTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newHeadWrap')).toHaveClass(/is-hidden/);
   });
 
   test('standpipe can be repositioned by click-drag', async ({ page }) => {
@@ -337,7 +377,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.goto('/?example=drain');
 
     await expect(page.locator('#exampleSelect')).toHaveValue('drain');
-    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.label);
+    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.summary);
     await expect(page.locator('#domainWidth')).toHaveValue(String(drainPreset.domain.width));
     await expect(page.locator('#inventorySummary')).toContainText(
       inventorySummaryText(presetLineCount(drainPreset), presetPolygonCount(drainPreset)),
@@ -361,7 +401,7 @@ test.describe('Flow Net Studio student workflow', () => {
     if (drainPreset.standpipePoint) {
       await expect(page.locator('#standpipeText')).not.toContainText('Choose the standpipe tool');
     }
-    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.label);
+    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.summary);
   });
 
   test('student can insert and delete polygon vertices with keyboard modifiers', async ({ page }) => {
@@ -384,7 +424,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const rightX = Math.max(start.x, end.x);
     const midTopX = 0.5 * (start.x + end.x);
 
-    await page.getByRole('button', { name: 'No-flow polygon' }).click();
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(end.x, end.y);
@@ -493,7 +533,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const rightX = Math.max(start.x, end.x);
     const midTopX = 0.5 * (start.x + end.x);
 
-    await page.getByRole('button', { name: 'No-flow polygon' }).click();
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(end.x, end.y);
