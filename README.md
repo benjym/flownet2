@@ -4,7 +4,7 @@ Interactive Vite + TypeScript web app for teaching 2D anisotropic groundwater fl
 
 Students can:
 - Draw boundary conditions (equipotential, phreatic, no-flow)
-- Add impermeable zones
+- Add impermeable no-flow polygons
 - Solve and visualize equipotential lines + flow lines
 - Place a standpipe to read hydraulic head and rise
 - Export a PNG of the current canvas
@@ -45,11 +45,15 @@ npm run build
 - `EP line`: fixed hydraulic head
 - `Phreatic`: fixed head equal to elevation
 - `No-flow line`: impermeable barrier
-- `No-flow zone`: impermeable rectangular zone
+- `No-flow polygon`: impermeable area (draw initial shape, then edit vertices)
 - `Standpipe`: click to read head and water rise
-3. Keep **Auto-solve** on, or click **Solve now**.
-4. Use **Boundary List** to select/edit items.
-5. Click **Download PNG** to save the visualization.
+3. In `Select`, edit polygons:
+- Drag polygon vertices to reshape
+- `Alt` + click edge to insert a vertex
+- `Ctrl`/`Cmd` + click a vertex to delete it (minimum 3 kept)
+4. Keep **Auto-solve** on, or click **Solve now**.
+5. Use **Boundary List** to select/edit items.
+6. Click **Download PNG** to save the visualization.
 
 ## Precision Controls (Desktop + Mobile)
 
@@ -60,7 +64,7 @@ Canvas toolbar controls:
 
 Keyboard shortcuts:
 - `Esc`: cancel in-progress drawing (and exit pan mode)
-- `Delete` / `Backspace`: remove selected boundary/zone
+- `Delete` / `Backspace`: remove selected boundary/polygon
 
 ## URL Parameters
 

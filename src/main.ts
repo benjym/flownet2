@@ -16,12 +16,9 @@ interface LineBoundary {
   head: number;
 }
 
-interface NoFlowZone {
+interface NoFlowPolygon {
   id: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  vertices: Point[];
 }
 
 interface DomainSettings {
@@ -81,11 +78,8 @@ interface PresetLine {
   head?: number;
 }
 
-interface PresetZone {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+interface PresetPolygon {
+  vertices: Point[];
 }
 
 interface ExamplePreset {
@@ -97,24 +91,20 @@ interface ExamplePreset {
   view: ViewSettings;
   newHead?: number;
   lines: PresetLine[];
-  zones?: PresetZone[];
+  polygons?: PresetPolygon[];
   standpipePoint?: Point;
 }
 
-type Selected = { kind: 'line'; id: number } | { kind: 'zone'; id: number } | null;
+type Selected = { kind: 'line'; id: number } | { kind: 'polygon'; id: number } | null;
 
 type DragState =
   | { type: 'none' }
   | { type: 'line-end'; id: number; endpoint: 'p1' | 'p2' }
   | { type: 'line-move'; id: number; startPointer: Point; startP1: Point; startP2: Point }
   | { type: 'pan'; startScreen: Point; startCenter: Point }
-  | {
-      type: 'zone-move';
-      id: number;
-      startPointer: Point;
-      startRect: { x: number; y: number; width: number; height: number };
-    }
-  | { type: 'zone-draw'; start: Point; current: Point };
+  | { type: 'polygon-move'; id: number; startPointer: Point; startVertices: Point[] }
+  | { type: 'polygon-vertex'; id: number; vertexIndex: number }
+  | { type: 'polygon-draw'; start: Point; current: Point };
 
 interface Viewport {
   left: number;
@@ -179,7 +169,7 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
   {
     id: 'earth-dam',
     label: 'Flow Through Earth Dam',
-    summary: 'Upstream and downstream heads with a user-defined phreatic surface and a central low-perm core.',
+    summary: 'Upstream/downstream heads with a phreatic surface and an impermeable central core polygon.',
     domain: { width: 45, height: 16 },
     solver: { nx: 101, ny: 51, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
     view: { contours: 16, streamlines: 14, autoSolve: true },
@@ -188,14 +178,23 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 16 }, head: 13 },
       { kind: 'equipotential', p1: { x: 45, y: 0 }, p2: { x: 45, y: 16 }, head: 3 },
       { kind: 'phreatic', p1: { x: 4, y: 13.8 }, p2: { x: 36, y: 9.6 } },
-      { kind: 'noflow', p1: { x: 22.5, y: 0 }, p2: { x: 22.5, y: 8.2 } },
+    ],
+    polygons: [
+      {
+        vertices: [
+          { x: 20, y: 0 },
+          { x: 25, y: 0 },
+          { x: 27.2, y: 9.2 },
+          { x: 17.8, y: 9.2 },
+        ],
+      },
     ],
     standpipePoint: { x: 28, y: 7.4 },
   },
   {
     id: 'cutoff-wall',
     label: 'Flow Under Cutoff Wall',
-    summary: 'Vertical impermeable cutoff wall forces seepage to dive deeper below the wall tip.',
+    summary: 'An impermeable cutoff-wall polygon forces seepage to dive deeper below the wall tip.',
     domain: { width: 38, height: 12 },
     solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.65 },
     view: { contours: 16, streamlines: 14, autoSolve: true },
@@ -203,14 +202,23 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10 },
       { kind: 'equipotential', p1: { x: 38, y: 0 }, p2: { x: 38, y: 12 }, head: 3 },
-      { kind: 'noflow', p1: { x: 18.5, y: 0 }, p2: { x: 18.5, y: 8.8 } },
+    ],
+    polygons: [
+      {
+        vertices: [
+          { x: 18.2, y: 0 },
+          { x: 18.8, y: 0 },
+          { x: 18.8, y: 8.8 },
+          { x: 18.2, y: 8.8 },
+        ],
+      },
     ],
     standpipePoint: { x: 22.8, y: 5.2 },
   },
   {
     id: 'drain',
     label: 'Flow Into Drain',
-    summary: 'Regional gradient with a short low-head drain line that attracts converging flow.',
+    summary: 'Regional gradient with a low-head drain line and an impermeable inclusion to bend paths.',
     domain: { width: 32, height: 12 },
     solver: { nx: 91, ny: 41, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
     view: { contours: 15, streamlines: 16, autoSolve: true },
@@ -220,12 +228,23 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
       { kind: 'equipotential', p1: { x: 32, y: 0 }, p2: { x: 32, y: 12 }, head: 6.2 },
       { kind: 'equipotential', p1: { x: 14.2, y: 0.7 }, p2: { x: 17.8, y: 0.7 }, head: 1.8 },
     ],
+    polygons: [
+      {
+        vertices: [
+          { x: 5.2, y: 2.3 },
+          { x: 10.8, y: 2.1 },
+          { x: 13.4, y: 5.4 },
+          { x: 8.2, y: 6.5 },
+          { x: 5, y: 4.4 },
+        ],
+      },
+    ],
     standpipePoint: { x: 15.8, y: 4.6 },
   },
   {
     id: 'sheet-pile',
     label: 'Seepage Beneath Sheet Pile',
-    summary: 'Top-down sheet pile interrupts shallow flow and bends equipotentials beneath the pile tip.',
+    summary: 'A thin sheet-pile polygon interrupts shallow flow and bends equipotentials below its tip.',
     domain: { width: 40, height: 12 },
     solver: { nx: 101, ny: 41, kx: 1, ky: 1, maxIter: 5200, tolerance: 1e-4, omega: 1.65 },
     view: { contours: 16, streamlines: 14, autoSolve: true },
@@ -233,7 +252,16 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
     lines: [
       { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 12 }, head: 10.5 },
       { kind: 'equipotential', p1: { x: 40, y: 0 }, p2: { x: 40, y: 12 }, head: 3 },
-      { kind: 'noflow', p1: { x: 20, y: 12 }, p2: { x: 20, y: 5.3 } },
+    ],
+    polygons: [
+      {
+        vertices: [
+          { x: 19.7, y: 12 },
+          { x: 20.3, y: 12 },
+          { x: 20.3, y: 5.3 },
+          { x: 19.7, y: 5.3 },
+        ],
+      },
     ],
     standpipePoint: { x: 24, y: 5.4 },
   },
@@ -305,11 +333,11 @@ appEl.innerHTML = `
           <button data-tool="equipotential">EP line</button>
           <button data-tool="phreatic">Phreatic</button>
           <button data-tool="noflow-line">No-flow line</button>
-          <button data-tool="noflow-zone">No-flow zone</button>
+          <button data-tool="noflow-zone">No-flow polygon</button>
           <button data-tool="standpipe">Standpipe</button>
         </div>
         <label>New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
-        <p id="toolHint" class="hint">Select and drag endpoints/lines/zones to edit geometry and BCs.</p>
+        <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
         <p id="toolStep" class="hint step-hint"></p>
       </section>
 
@@ -355,7 +383,7 @@ appEl.innerHTML = `
           <li>Default outer boundary is no-flow unless you draw EP/phreatic lines.</li>
           <li>EP lines impose fixed hydraulic head.</li>
           <li>Phreatic line is a user-drawn fixed head equal to elevation.</li>
-          <li>No-flow lines and zones act as impermeable boundaries.</li>
+          <li>No-flow lines and no-flow polygons act as impermeable boundaries.</li>
           <li>Canvas controls: <strong>+</strong>/<strong>-</strong> zoom, <strong>Pan</strong> drag, <strong>Fit</strong> reset view.</li>
           <li>Keyboard: <strong>Esc</strong> cancels drawing, <strong>Delete</strong> removes selected item.</li>
         </ul>
@@ -445,7 +473,7 @@ const state = {
   pendingLineStart: null as Point | null,
   previewPoint: null as Point | null,
   lineBoundaries: [] as LineBoundary[],
-  zones: [] as NoFlowZone[],
+  polygons: [] as NoFlowPolygon[],
   selected: null as Selected,
   drag: { type: 'none' } as DragState,
   nextId: 1,
@@ -559,20 +587,17 @@ function loadExampleById(
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.camera.panMode = false;
   state.lineBoundaries = [];
-  state.zones = [];
+  state.polygons = [];
   state.nextId = 1;
 
   preset.lines.forEach((line) => {
     addBoundary(line.kind, line.p1, line.p2, line.head ?? 0);
   });
 
-  (preset.zones ?? []).forEach((zone) => {
-    state.zones.push({
+  (preset.polygons ?? []).forEach((polygon) => {
+    state.polygons.push({
       id: state.nextId++,
-      x: zone.x,
-      y: zone.y,
-      width: zone.width,
-      height: zone.height,
+      vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
     });
   });
 
@@ -765,13 +790,13 @@ function readInputsIntoState(): void {
       line.p2 = clampPoint(line.p2);
     });
 
-    state.zones.forEach((zone) => {
-      zone.x *= widthScale;
-      zone.y *= heightScale;
-      zone.width *= widthScale;
-      zone.height *= heightScale;
-      normalizeZone(zone);
-      clampZone(zone);
+    state.polygons.forEach((polygon) => {
+      polygon.vertices = polygon.vertices.map((vertex) =>
+        clampPoint({
+          x: vertex.x * widthScale,
+          y: vertex.y * heightScale,
+        }),
+      );
     });
 
     if (state.standpipePoint) {
@@ -857,7 +882,7 @@ function onKeyDown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     const hadPendingDraw =
       state.pendingLineStart !== null ||
-      state.drag.type === 'zone-draw' ||
+      state.drag.type === 'polygon-draw' ||
       state.drag.type === 'pan' ||
       state.camera.panMode;
     if (!hadPendingDraw) {
@@ -892,7 +917,7 @@ function deleteSelected(): void {
   if (state.selected.kind === 'line') {
     state.lineBoundaries = state.lineBoundaries.filter((line) => line.id !== state.selected?.id);
   } else {
-    state.zones = state.zones.filter((zone) => zone.id !== state.selected?.id);
+    state.polygons = state.polygons.filter((polygon) => polygon.id !== state.selected?.id);
   }
   state.selected = null;
   updateSelectionPanel();
@@ -963,7 +988,7 @@ function onPointerDown(event: PointerEvent): void {
   }
 
   if (state.tool === 'select') {
-    startSelectionDrag(point);
+    startSelectionDrag(point, event);
     render();
     return;
   }
@@ -977,7 +1002,7 @@ function onPointerDown(event: PointerEvent): void {
   }
 
   if (state.tool === 'noflow-zone') {
-    state.drag = { type: 'zone-draw', start: point, current: point };
+    state.drag = { type: 'polygon-draw', start: point, current: point };
     updateGuidanceUI();
     render();
     return;
@@ -1092,22 +1117,41 @@ function onPointerMove(event: PointerEvent): void {
     return;
   }
 
-  if (state.drag.type === 'zone-move') {
+  if (state.drag.type === 'polygon-move') {
     const drag = state.drag;
-    const zone = state.zones.find((item) => item.id === drag.id);
-    if (!zone) {
+    const polygon = state.polygons.find((item) => item.id === drag.id);
+    if (!polygon) {
       return;
     }
     const dxRaw = point.x - drag.startPointer.x;
     const dyRaw = point.y - drag.startPointer.y;
-    zone.x = clamp(drag.startRect.x + dxRaw, 0, state.domain.width - zone.width);
-    zone.y = clamp(drag.startRect.y + dyRaw, 0, state.domain.height - zone.height);
+
+    const startBounds = polygonBoundsFromVertices(drag.startVertices);
+    const dx = clamp(dxRaw, -startBounds.minX, state.domain.width - startBounds.maxX);
+    const dy = clamp(dyRaw, -startBounds.minY, state.domain.height - startBounds.maxY);
+
+    polygon.vertices = drag.startVertices.map((vertex) => ({
+      x: vertex.x + dx,
+      y: vertex.y + dy,
+    }));
     scheduleSolve();
     render();
     return;
   }
 
-  if (state.drag.type === 'zone-draw') {
+  if (state.drag.type === 'polygon-vertex') {
+    const drag = state.drag;
+    const polygon = state.polygons.find((item) => item.id === drag.id);
+    if (!polygon || drag.vertexIndex < 0 || drag.vertexIndex >= polygon.vertices.length) {
+      return;
+    }
+    polygon.vertices[drag.vertexIndex] = clampPoint(point);
+    scheduleSolve();
+    render();
+    return;
+  }
+
+  if (state.drag.type === 'polygon-draw') {
     state.drag.current = point;
     render();
     return;
@@ -1123,11 +1167,11 @@ function onPointerUp(event: PointerEvent): void {
     ? clampPoint(screenToWorld(screenPoint, view))
     : null;
 
-  if (point && state.drag.type === 'zone-draw') {
-    const zone = createZoneFromDrag(state.drag.start, state.drag.current);
-    if (zone) {
-      state.zones.push(zone);
-      state.selected = { kind: 'zone', id: zone.id };
+  if (point && state.drag.type === 'polygon-draw') {
+    const polygon = createPolygonFromDrag(state.drag.start, state.drag.current);
+    if (polygon) {
+      state.polygons.push(polygon);
+      state.selected = { kind: 'polygon', id: polygon.id };
       updateSelectionPanel();
       scheduleSolve();
     }
@@ -1141,14 +1185,25 @@ function onPointerUp(event: PointerEvent): void {
 }
 
 function onPointerLeave(): void {
-  if (state.drag.type === 'zone-draw') {
+  if (state.drag.type === 'polygon-draw') {
     return;
   }
   state.previewPoint = null;
   render();
 }
 
-function createZoneFromDrag(start: Point, end: Point): NoFlowZone | null {
+function createPolygonFromDrag(start: Point, end: Point): NoFlowPolygon | null {
+  const vertices = rectangleVerticesFromDrag(start, end);
+  if (!vertices) {
+    return null;
+  }
+  return {
+    id: state.nextId++,
+    vertices,
+  };
+}
+
+function rectangleVerticesFromDrag(start: Point, end: Point): Point[] | null {
   const x = Math.min(start.x, end.x);
   const y = Math.min(start.y, end.y);
   const width = Math.abs(end.x - start.x);
@@ -1157,16 +1212,15 @@ function createZoneFromDrag(start: Point, end: Point): NoFlowZone | null {
   if (width < minSide || height < minSide) {
     return null;
   }
-  return {
-    id: state.nextId++,
-    x,
-    y,
-    width,
-    height,
-  };
+  return [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
 }
 
-function startSelectionDrag(point: Point): void {
+function startSelectionDrag(point: Point, event: PointerEvent): void {
   const endpointHit = findLineEndpoint(point);
   if (endpointHit) {
     state.selected = { kind: 'line', id: endpointHit.id };
@@ -1179,19 +1233,50 @@ function startSelectionDrag(point: Point): void {
     return;
   }
 
-  const zoneHit = findZone(point);
-  if (zoneHit) {
-    state.selected = { kind: 'zone', id: zoneHit.id };
+  const vertexHit = findPolygonVertex(point);
+  const edgeHit = findPolygonEdge(point);
+  const polygonHit = findPolygon(point);
+
+  if ((event.ctrlKey || event.metaKey) && vertexHit) {
+    const polygon = state.polygons.find((item) => item.id === vertexHit.id);
+    if (polygon && polygon.vertices.length > 3) {
+      polygon.vertices.splice(vertexHit.vertexIndex, 1);
+      state.selected = { kind: 'polygon', id: polygon.id };
+      updateSelectionPanel();
+      scheduleSolve();
+    }
+    render();
+    return;
+  }
+
+  if (event.altKey && edgeHit) {
+    const polygon = state.polygons.find((item) => item.id === edgeHit.id);
+    if (!polygon) {
+      return;
+    }
+    const insertIndex = edgeHit.edgeIndex + 1;
+    polygon.vertices.splice(insertIndex, 0, edgeHit.projection);
+    state.selected = { kind: 'polygon', id: polygon.id };
+    state.drag = { type: 'polygon-vertex', id: polygon.id, vertexIndex: insertIndex };
+    updateSelectionPanel();
+    scheduleSolve();
+    return;
+  }
+
+  if (vertexHit) {
+    state.selected = { kind: 'polygon', id: vertexHit.id };
+    state.drag = { type: 'polygon-vertex', id: vertexHit.id, vertexIndex: vertexHit.vertexIndex };
+    updateSelectionPanel();
+    return;
+  }
+
+  if (polygonHit) {
+    state.selected = { kind: 'polygon', id: polygonHit.id };
     state.drag = {
-      type: 'zone-move',
-      id: zoneHit.id,
+      type: 'polygon-move',
+      id: polygonHit.id,
       startPointer: point,
-      startRect: {
-        x: zoneHit.x,
-        y: zoneHit.y,
-        width: zoneHit.width,
-        height: zoneHit.height,
-      },
+      startVertices: polygonHit.vertices.map((vertex) => ({ ...vertex })),
     };
     updateSelectionPanel();
     return;
@@ -1230,11 +1315,58 @@ function findLineEndpoint(point: Point): { id: number; endpoint: 'p1' | 'p2' } |
   return null;
 }
 
-function findZone(point: Point): NoFlowZone | null {
-  for (let index = state.zones.length - 1; index >= 0; index -= 1) {
-    const zone = state.zones[index];
-    if (pointInZone(point, zone)) {
-      return zone;
+function findPolygonVertex(point: Point): { id: number; vertexIndex: number } | null {
+  const threshold = 1.1 * pointerWorldThreshold();
+  for (let polygonIndex = state.polygons.length - 1; polygonIndex >= 0; polygonIndex -= 1) {
+    const polygon = state.polygons[polygonIndex];
+    for (let vertexIndex = 0; vertexIndex < polygon.vertices.length; vertexIndex += 1) {
+      if (distance(point, polygon.vertices[vertexIndex]) <= threshold) {
+        return { id: polygon.id, vertexIndex };
+      }
+    }
+  }
+  return null;
+}
+
+function findPolygonEdge(point: Point): { id: number; edgeIndex: number; projection: Point } | null {
+  const threshold = 1.1 * pointerWorldThreshold();
+  for (let polygonIndex = state.polygons.length - 1; polygonIndex >= 0; polygonIndex -= 1) {
+    const polygon = state.polygons[polygonIndex];
+    if (polygon.vertices.length < 2) {
+      continue;
+    }
+    let bestDist = Number.POSITIVE_INFINITY;
+    let bestIndex = -1;
+    let bestProjection: Point | null = null;
+
+    for (let i = 0; i < polygon.vertices.length; i += 1) {
+      const a = polygon.vertices[i];
+      const b = polygon.vertices[(i + 1) % polygon.vertices.length];
+      const projection = projectPointToSegment(point, a, b);
+      const dist = distance(point, projection);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = i;
+        bestProjection = projection;
+      }
+    }
+
+    if (bestProjection && bestDist <= threshold) {
+      return {
+        id: polygon.id,
+        edgeIndex: bestIndex,
+        projection: clampPoint(bestProjection),
+      };
+    }
+  }
+  return null;
+}
+
+function findPolygon(point: Point): NoFlowPolygon | null {
+  for (let index = state.polygons.length - 1; index >= 0; index -= 1) {
+    const polygon = state.polygons[index];
+    if (pointInPolygon(point, polygon.vertices)) {
+      return polygon;
     }
   }
   return null;
@@ -1283,22 +1415,18 @@ function clampPoint(point: Point): Point {
   };
 }
 
-function clampZone(zone: NoFlowZone): void {
-  zone.width = clamp(zone.width, 0.05, state.domain.width);
-  zone.height = clamp(zone.height, 0.05, state.domain.height);
-  zone.x = clamp(zone.x, 0, state.domain.width - zone.width);
-  zone.y = clamp(zone.y, 0, state.domain.height - zone.height);
-}
-
-function normalizeZone(zone: NoFlowZone): void {
-  if (zone.width < 0) {
-    zone.x += zone.width;
-    zone.width *= -1;
-  }
-  if (zone.height < 0) {
-    zone.y += zone.height;
-    zone.height *= -1;
-  }
+function polygonBoundsFromVertices(vertices: Point[]): { minX: number; maxX: number; minY: number; maxY: number } {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  vertices.forEach((vertex) => {
+    minX = Math.min(minX, vertex.x);
+    maxX = Math.max(maxX, vertex.x);
+    minY = Math.min(minY, vertex.y);
+    maxY = Math.max(maxY, vertex.y);
+  });
+  return { minX, maxX, minY, maxY };
 }
 
 function resizeCanvas(): void {
@@ -1327,7 +1455,7 @@ function scheduleSolve(delay = 120): void {
 }
 
 function solveAndRender(): void {
-  state.solution = solveGroundwater(state.domain, state.solver, state.view, state.lineBoundaries, state.zones);
+  state.solution = solveGroundwater(state.domain, state.solver, state.view, state.lineBoundaries, state.polygons);
   updateStandpipeReading();
 
   const anisotropyRatio = state.solver.kx / state.solver.ky;
@@ -1349,11 +1477,11 @@ function solveAndRender(): void {
 
 function updateGuidanceUI(): void {
   const hints: Record<Tool, string> = {
-    select: 'Select and drag endpoints/lines/zones to edit geometry and BCs.',
+    select: 'Select and drag endpoints/lines/polygons to edit geometry and BCs.',
     equipotential: 'Draw a fixed-head equipotential (EP) line.',
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
     'noflow-line': 'Draw an impermeable no-flow line.',
-    'noflow-zone': 'Draw an impermeable no-flow zone.',
+    'noflow-zone': 'Draw an impermeable no-flow polygon.',
     standpipe: 'Place standpipe points to read pressure head and rise.',
   };
   toolHint.textContent = hints[state.tool];
@@ -1362,15 +1490,16 @@ function updateGuidanceUI(): void {
   if (state.camera.panMode) {
     stepText = 'Pan mode: drag the canvas to move view. Use + / - (or wheel) to zoom, then Fit to reset.';
   } else if (state.tool === 'select') {
-    stepText = 'Step: click a boundary or zone, then drag to move. Drag orange endpoints to reshape lines.';
+    stepText =
+      'Step: click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge to add a vertex; Ctrl/Cmd+click a vertex to delete.';
   } else if (state.tool === 'equipotential' || state.tool === 'phreatic' || state.tool === 'noflow-line') {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
       : 'Step 1 of 2: click first endpoint for a new line.';
   } else if (state.tool === 'noflow-zone') {
-    stepText = state.drag.type === 'zone-draw'
-      ? 'Step 2 of 2: drag and release to set zone size. Press Esc to cancel.'
-      : 'Step 1 of 2: click and drag to create a rectangular no-flow zone.';
+    stepText = state.drag.type === 'polygon-draw'
+      ? 'Step 2 of 2: drag and release to set initial polygon size. Press Esc to cancel.'
+      : 'Step 1 of 2: click and drag to create an initial polygon.';
   } else {
     stepText = 'Step 1 of 1: click inside active soil to place a standpipe.';
   }
@@ -1380,7 +1509,7 @@ function updateGuidanceUI(): void {
   canvasPrompt.textContent =
     `${stepText} | View x:${bounds.xMin.toFixed(1)}-${(bounds.xMin + bounds.width).toFixed(1)}m ` +
     `y:${bounds.yMin.toFixed(1)}-${(bounds.yMin + bounds.height).toFixed(1)}m | ` +
-    `${state.lineBoundaries.length} line BCs, ${state.zones.length} no-flow zones.`;
+    `${state.lineBoundaries.length} line BCs, ${state.polygons.length} no-flow polygons.`;
   zoomLabel.textContent = `${Math.round(state.camera.zoom * 100)}%`;
   panModeBtn.textContent = state.camera.panMode ? 'Pan: On' : 'Pan: Off';
   panModeBtn.classList.toggle('is-active', state.camera.panMode);
@@ -1388,12 +1517,12 @@ function updateGuidanceUI(): void {
 
 function updateBoundaryInventory(): void {
   const lines = [...state.lineBoundaries].sort((a, b) => a.id - b.id);
-  const zones = [...state.zones].sort((a, b) => a.id - b.id);
+  const polygons = [...state.polygons].sort((a, b) => a.id - b.id);
 
-  inventorySummary.textContent = `${lines.length} line BCs + ${zones.length} no-flow zones`;
+  inventorySummary.textContent = `${lines.length} line BCs + ${polygons.length} no-flow polygons`;
   inventoryList.innerHTML = '';
 
-  if (lines.length === 0 && zones.length === 0) {
+  if (lines.length === 0 && polygons.length === 0) {
     const emptyState = document.createElement('p');
     emptyState.className = 'inventory-empty';
     emptyState.textContent = 'No boundaries added yet.';
@@ -1424,16 +1553,16 @@ function updateBoundaryInventory(): void {
     inventoryList.appendChild(button);
   });
 
-  zones.forEach((zone) => {
+  polygons.forEach((polygon) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'inventory-item';
-    if (state.selected?.kind === 'zone' && state.selected.id === zone.id) {
+    if (state.selected?.kind === 'polygon' && state.selected.id === polygon.id) {
       button.classList.add('is-selected');
     }
-    button.textContent = `No-flow zone #${zone.id} (${zone.width.toFixed(1)}m x ${zone.height.toFixed(1)}m)`;
+    button.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
     button.addEventListener('click', () => {
-      state.selected = { kind: 'zone', id: zone.id };
+      state.selected = { kind: 'polygon', id: polygon.id };
       updateSelectionPanel();
       render();
     });
@@ -1476,15 +1605,15 @@ function updateSelectionPanel(): void {
     return;
   }
 
-  const zone = state.zones.find((item) => item.id === state.selected?.id);
-  if (!zone) {
+  const polygon = state.polygons.find((item) => item.id === state.selected?.id);
+  if (!polygon) {
     selectionType.textContent = 'Nothing selected.';
     selectedHeadRow.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
   }
-  selectionType.textContent = `No-flow zone #${zone.id} (${zone.width.toFixed(2)}m x ${zone.height.toFixed(2)}m)`;
+  selectionType.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
   selectedHeadRow.classList.add('is-hidden');
   updateBoundaryInventory();
   updateGuidanceUI();
@@ -1519,7 +1648,7 @@ function solveGroundwater(
   solver: SolverSettings,
   view: ViewSettings,
   lineBoundaries: LineBoundary[],
-  zones: NoFlowZone[],
+  polygons: NoFlowPolygon[],
 ): Solution {
   const { nx, ny, kx, ky, maxIter, tolerance, omega } = solver;
   const dx = domain.width / (nx - 1);
@@ -1533,43 +1662,52 @@ function solveGroundwater(
   const fixedLines = lineBoundaries.filter((line) => line.kind === 'equipotential' || line.kind === 'phreatic');
 
   const bandThickness = 0.5 * Math.min(dx, dy);
+  const noFlowPaddingCells = 1;
+  const noFlowMask = Array.from({ length: ny }, () => Array.from({ length: nx }, () => false));
+
+  noFlowLines.forEach((line) => {
+    const nodes = rasterizeLineNodes(line.p1, line.p2, domain, solver, noFlowPaddingCells);
+    nodes.forEach(({ i, j }) => {
+      noFlowMask[j][i] = true;
+    });
+  });
 
   for (let j = 0; j < ny; j += 1) {
     for (let i = 0; i < nx; i += 1) {
       const point = { x: i * dx, y: j * dy };
-      if (zones.some((zone) => pointInZone(point, zone))) {
+      if (noFlowMask[j][i]) {
         active[j][i] = false;
         continue;
       }
-      if (noFlowLines.some((line) => distancePointToSegment(point, line.p1, line.p2) <= bandThickness)) {
+      if (
+        polygons.some((polygon) =>
+          pointInPolygon(point, polygon.vertices) ||
+          distancePointToPolygonEdges(point, polygon.vertices) <= bandThickness,
+        )
+      ) {
         active[j][i] = false;
       }
     }
   }
 
-  const dirichletThreshold = 0.55 * Math.min(dx, dy);
   let dirichletCount = 0;
   let fixedHeadSum = 0;
 
   fixedLines.forEach((line) => {
-    for (let j = 0; j < ny; j += 1) {
-      for (let i = 0; i < nx; i += 1) {
-        if (!active[j][i]) {
-          continue;
-        }
-        const point = { x: i * dx, y: j * dy };
-        if (distancePointToSegment(point, line.p1, line.p2) > dirichletThreshold) {
-          continue;
-        }
-        const projection = projectPointToSegment(point, line.p1, line.p2);
-        const value = line.kind === 'equipotential' ? line.head : projection.y;
-        if (!dirichlet[j][i]) {
-          dirichletCount += 1;
-        }
-        dirichlet[j][i] = true;
-        heads[j][i] = value;
+    const nodes = rasterizeLineNodes(line.p1, line.p2, domain, solver, 0);
+    nodes.forEach(({ i, j }) => {
+      if (!active[j][i]) {
+        return;
       }
-    }
+      const point = { x: i * dx, y: j * dy };
+      const projection = projectPointToSegment(point, line.p1, line.p2);
+      const value = line.kind === 'equipotential' ? line.head : projection.y;
+      if (!dirichlet[j][i]) {
+        dirichletCount += 1;
+      }
+      dirichlet[j][i] = true;
+      heads[j][i] = value;
+    });
   });
 
   for (let j = 0; j < ny; j += 1) {
@@ -2138,7 +2276,7 @@ function render(): void {
     drawStreamPaths(view, state.solution.streamPaths);
   }
 
-  drawZones(view);
+  drawNoFlowPolygons(view);
   drawBoundaries(view);
   drawPendingShape(view);
   drawStandpipe(view);
@@ -2242,28 +2380,23 @@ function drawStreamPaths(view: CanvasView, lines: Point[][]): void {
   });
 }
 
-function drawZones(view: CanvasView): void {
-  state.zones.forEach((zone) => {
-    const topLeft = worldToScreen({ x: zone.x, y: zone.y + zone.height }, view);
-    const bottomRight = worldToScreen({ x: zone.x + zone.width, y: zone.y }, view);
-    const width = bottomRight.x - topLeft.x;
-    const height = bottomRight.y - topLeft.y;
-
+function drawNoFlowPolygons(view: CanvasView): void {
+  state.polygons.forEach((polygon) => {
+    if (polygon.vertices.length < 3) {
+      return;
+    }
+    const screenVertices = polygon.vertices.map((vertex) => worldToScreen(vertex, view));
+    ctx.beginPath();
+    ctx.moveTo(screenVertices[0].x, screenVertices[0].y);
+    for (let idx = 1; idx < screenVertices.length; idx += 1) {
+      ctx.lineTo(screenVertices[idx].x, screenVertices[idx].y);
+    }
+    ctx.closePath();
     ctx.fillStyle = 'rgba(30, 41, 59, 0.18)';
-    ctx.fillRect(topLeft.x, topLeft.y, width, height);
+    ctx.fill();
     ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 1.2;
-    ctx.strokeRect(topLeft.x, topLeft.y, width, height);
-
-    ctx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
-    ctx.lineWidth = 1;
-    const stride = 10;
-    for (let x = topLeft.x - height; x < topLeft.x + width; x += stride) {
-      ctx.beginPath();
-      ctx.moveTo(x, topLeft.y + height);
-      ctx.lineTo(x + height, topLeft.y);
-      ctx.stroke();
-    }
+    ctx.stroke();
   });
 }
 
@@ -2320,24 +2453,25 @@ function drawPendingShape(view: CanvasView): void {
     ctx.setLineDash([]);
   }
 
-  if (state.drag.type === 'zone-draw') {
-    const zonePreview = createZoneFromDrag(state.drag.start, state.drag.current);
-    if (!zonePreview) {
+  if (state.drag.type === 'polygon-draw') {
+    const previewVertices = rectangleVerticesFromDrag(state.drag.start, state.drag.current);
+    if (!previewVertices) {
       return;
     }
 
-    const topLeft = worldToScreen({ x: zonePreview.x, y: zonePreview.y + zonePreview.height }, view);
-    const bottomRight = worldToScreen(
-      { x: zonePreview.x + zonePreview.width, y: zonePreview.y },
-      view,
-    );
-
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.15)';
+    const screenVertices = previewVertices.map((vertex) => worldToScreen(vertex, view));
+    ctx.beginPath();
+    ctx.moveTo(screenVertices[0].x, screenVertices[0].y);
+    for (let idx = 1; idx < screenVertices.length; idx += 1) {
+      ctx.lineTo(screenVertices[idx].x, screenVertices[idx].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.14)';
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
-    ctx.fillRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
-    ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+    ctx.fill();
+    ctx.stroke();
     ctx.setLineDash([]);
   }
 }
@@ -2413,19 +2547,35 @@ function drawSelection(view: CanvasView): void {
     return;
   }
 
-  const zone = state.zones.find((item) => item.id === state.selected?.id);
-  if (!zone) {
+  const polygon = state.polygons.find((item) => item.id === state.selected?.id);
+  if (!polygon || polygon.vertices.length < 3) {
     return;
   }
 
-  const topLeft = worldToScreen({ x: zone.x, y: zone.y + zone.height }, view);
-  const bottomRight = worldToScreen({ x: zone.x + zone.width, y: zone.y }, view);
+  const screenVertices = polygon.vertices.map((vertex) => worldToScreen(vertex, view));
 
   ctx.strokeStyle = '#f59e0b';
   ctx.lineWidth = 2;
   ctx.setLineDash([6, 4]);
-  ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+  ctx.beginPath();
+  ctx.moveTo(screenVertices[0].x, screenVertices[0].y);
+  for (let idx = 1; idx < screenVertices.length; idx += 1) {
+    ctx.lineTo(screenVertices[idx].x, screenVertices[idx].y);
+  }
+  ctx.closePath();
+  ctx.stroke();
   ctx.setLineDash([]);
+
+  const handleRadius = state.coarsePointer || state.lastPointerType === 'touch' ? 8 : 5;
+  screenVertices.forEach((handle) => {
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, handleRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
 }
 
 function drawOverlayLegend(view: CanvasView): void {
@@ -2555,13 +2705,160 @@ function distancePointToSegment(point: Point, a: Point, b: Point): number {
   return distance(point, projection);
 }
 
-function pointInZone(point: Point, zone: NoFlowZone): boolean {
-  return (
-    point.x >= zone.x &&
-    point.x <= zone.x + zone.width &&
-    point.y >= zone.y &&
-    point.y <= zone.y + zone.height
-  );
+function pointInPolygon(point: Point, vertices: Point[]): boolean {
+  if (vertices.length < 3) {
+    return false;
+  }
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i, i += 1) {
+    const vi = vertices[i];
+    const vj = vertices[j];
+    const intersect =
+      (vi.y > point.y) !== (vj.y > point.y) &&
+      point.x < ((vj.x - vi.x) * (point.y - vi.y)) / (vj.y - vi.y + 1e-12) + vi.x;
+    if (intersect) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function distancePointToPolygonEdges(point: Point, vertices: Point[]): number {
+  if (vertices.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    best = Math.min(best, distancePointToSegment(point, a, b));
+  }
+  return best;
+}
+
+function rasterizeLineNodes(
+  a: Point,
+  b: Point,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  paddingCells: number,
+): Array<{ i: number; j: number }> {
+  const dx = domain.width / (solver.nx - 1);
+  const dy = domain.height / (solver.ny - 1);
+
+  const toGridNode = (point: Point): { i: number; j: number } => ({
+    i: clamp(Math.round(point.x / dx), 0, solver.nx - 1),
+    j: clamp(Math.round(point.y / dy), 0, solver.ny - 1),
+  });
+
+  const spanI = Math.abs((b.x - a.x) / dx);
+  const spanJ = Math.abs((b.y - a.y) / dy);
+  const segments = Math.max(1, Math.ceil(4 * Math.max(spanI, spanJ)));
+
+  const nodes: Array<{ i: number; j: number }> = [];
+  const visited = new Set<string>();
+
+  const addNode = (i: number, j: number): void => {
+    if (i < 0 || i >= solver.nx || j < 0 || j >= solver.ny) {
+      return;
+    }
+    const key = `${i},${j}`;
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    nodes.push({ i, j });
+  };
+
+  const addWithPadding = (i: number, j: number): void => {
+    if (paddingCells <= 0) {
+      addNode(i, j);
+      return;
+    }
+    for (let dj = -paddingCells; dj <= paddingCells; dj += 1) {
+      for (let di = -paddingCells; di <= paddingCells; di += 1) {
+        if (di * di + dj * dj > paddingCells * paddingCells) {
+          continue;
+        }
+        addNode(i + di, j + dj);
+      }
+    }
+  };
+
+  let previous = toGridNode(a);
+  addWithPadding(previous.i, previous.j);
+
+  for (let step = 1; step <= segments; step += 1) {
+    const t = step / segments;
+    const sample = {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+    };
+    const current = toGridNode(sample);
+    supercoverGridLine(previous.i, previous.j, current.i, current.j).forEach((node) => {
+      addWithPadding(node.i, node.j);
+    });
+    previous = current;
+  }
+
+  return nodes;
+}
+
+function supercoverGridLine(
+  i0: number,
+  j0: number,
+  i1: number,
+  j1: number,
+): Array<{ i: number; j: number }> {
+  const nodes: Array<{ i: number; j: number }> = [];
+  const deltaI = i1 - i0;
+  const deltaJ = j1 - j0;
+  const stepsI = Math.abs(deltaI);
+  const stepsJ = Math.abs(deltaJ);
+  const stepI = Math.sign(deltaI);
+  const stepJ = Math.sign(deltaJ);
+
+  let i = i0;
+  let j = j0;
+  let walkedI = 0;
+  let walkedJ = 0;
+
+  nodes.push({ i, j });
+
+  while (walkedI < stepsI || walkedJ < stepsJ) {
+    const ratioI = stepsI === 0 ? Number.POSITIVE_INFINITY : (0.5 + walkedI) / stepsI;
+    const ratioJ = stepsJ === 0 ? Number.POSITIVE_INFINITY : (0.5 + walkedJ) / stepsJ;
+
+    if (Math.abs(ratioI - ratioJ) < 1e-12) {
+      i += stepI;
+      j += stepJ;
+      if (stepsI > 0) {
+        walkedI += 1;
+      }
+      if (stepsJ > 0) {
+        walkedJ += 1;
+      }
+      if (stepI !== 0) {
+        nodes.push({ i, j: j - stepJ });
+      }
+      if (stepJ !== 0) {
+        nodes.push({ i: i - stepI, j });
+      }
+      nodes.push({ i, j });
+      continue;
+    }
+
+    if (ratioI < ratioJ) {
+      i += stepI;
+      walkedI += 1;
+    } else {
+      j += stepJ;
+      walkedJ += 1;
+    }
+    nodes.push({ i, j });
+  }
+
+  return nodes;
 }
 
 function normalize(vector: Point): Point {

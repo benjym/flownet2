@@ -36,12 +36,12 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.click(point(0.76, 0.24).x, point(0.76, 0.24).y);
     await expect(page.locator('#inventorySummary')).toContainText('3 line BCs');
 
-    await page.getByRole('button', { name: 'No-flow zone' }).click();
+    await page.getByRole('button', { name: 'No-flow polygon' }).click();
     await page.mouse.move(point(0.42, 0.53).x, point(0.42, 0.53).y);
     await page.mouse.down();
     await page.mouse.move(point(0.58, 0.68).x, point(0.58, 0.68).y);
     await page.mouse.up();
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 1 no-flow zones');
+    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 1 no-flow polygons');
 
     await page.getByRole('button', { name: /Phreatic #/ }).click();
     await expect(page.locator('#selectionType')).toContainText('Phreatic line');
@@ -84,7 +84,7 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#toolStep')).toContainText('Step 1 of 2');
-    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 0 no-flow zones');
+    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 0 no-flow polygons');
   });
 
   test('anisotropy change updates solver status', async ({ page }) => {
@@ -130,7 +130,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#selectionType')).toContainText('Equipotential line #1');
 
     await page.keyboard.press('Delete');
-    await expect(page.locator('#inventorySummary')).toContainText('1 line BCs + 0 no-flow zones');
+    await expect(page.locator('#inventorySummary')).toContainText('1 line BCs + 0 no-flow polygons');
     await expect(page.locator('#selectionType')).toContainText('Nothing selected.');
   });
 
@@ -186,8 +186,8 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#exampleSelect')).toHaveValue('cutoff-wall');
     await expect(page.locator('#exampleSummary')).toContainText(/cutoff wall/i);
     await expect(page.locator('#domainWidth')).toHaveValue('38');
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 0 no-flow zones');
-    await expect(page.getByRole('button', { name: 'No-flow line #3' })).toBeVisible();
+    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 1 no-flow polygons');
+    await expect(page.getByRole('button', { name: /No-flow polygon #/ })).toBeVisible();
   });
 
   test('student can switch to drain example from preset picker', async ({ page }) => {
@@ -198,9 +198,49 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await expect(page.locator('#domainWidth')).toHaveValue('32');
     await expect(page.locator('#kx')).toHaveValue('1');
-    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 0 no-flow zones');
+    await expect(page.locator('#inventorySummary')).toContainText('3 line BCs + 1 no-flow polygons');
     await expect(page.getByRole('button', { name: /EP #3/ })).toBeVisible();
     await expect(page.locator('#standpipeText')).toContainText('head');
     await expect(page.locator('#exampleSummary')).toContainText(/drain/i);
+  });
+
+  test('student can insert and delete polygon vertices with keyboard modifiers', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+    const start = point(0.4, 0.55);
+    const end = point(0.6, 0.7);
+    const topY = Math.min(start.y, end.y);
+    const rightX = Math.max(start.x, end.x);
+    const midTopX = 0.5 * (start.x + end.x);
+
+    await page.getByRole('button', { name: 'No-flow polygon' }).click();
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y);
+    await page.mouse.up();
+
+    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.keyboard.down('Alt');
+    await page.mouse.click(midTopX, topY);
+    await page.keyboard.up('Alt');
+    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(5 vertices\)/ })).toBeVisible();
+
+    await page.keyboard.down('Control');
+    await page.mouse.click(rightX, topY);
+    await page.keyboard.up('Control');
+    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
   });
 });
