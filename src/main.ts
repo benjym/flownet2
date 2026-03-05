@@ -1683,7 +1683,7 @@ function updateGuidanceUI(): void {
     stepText = 'Pan mode: drag the canvas to move view. Use + / - (or wheel) to zoom, then Fit to reset.';
   } else if (state.tool === 'select') {
     stepText =
-      'Step: click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge of the selected item to add a vertex; Ctrl/Cmd+click a vertex of the selected item to delete.';
+      'Click a boundary/polygon to move. Drag orange handles to reshape; Alt+click an edge of the selected item to add a vertex; Ctrl/Cmd+click a vertex of the selected item to delete.';
   } else if (state.tool === 'equipotential' || state.tool === 'phreatic' || state.tool === 'noflow-line') {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'

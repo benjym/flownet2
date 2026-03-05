@@ -146,7 +146,7 @@ input[type="checkbox"] {
   display: flex;
   flex-wrap: wrap;
   gap: 0.38rem;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0;
 }
 
 button {
@@ -313,6 +313,35 @@ button.danger {
   background: linear-gradient(180deg, #eff5f9, #f1f1f1);
 }
 
+.canvas-toolsbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.42rem 0.62rem;
+  padding: 0.38rem 0.65rem 0.44rem;
+  border-bottom: 1px solid #e3e3e3;
+  background: linear-gradient(180deg, #f4f8fb, #eff4f6);
+}
+
+.canvas-toolsbar .tool-row {
+  flex: 1 1 520px;
+}
+
+.canvas-ep-head {
+  flex: 0 0 165px;
+  font-size: 0.78rem;
+}
+
+.canvas-toolsbar .hint {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: 0.76rem;
+}
+
+.canvas-toolsbar .step-hint {
+  margin-top: 0;
+}
+
 .canvas-toolbar p {
   margin: 0;
   flex: 1 1 auto;
@@ -405,6 +434,23 @@ button.danger {
   .view-controls button {
     min-height: 34px;
     min-width: 2.15rem;
+  }
+
+  .canvas-toolsbar {
+    padding: 0.4rem 0.55rem 0.5rem;
+    gap: 0.4rem;
+  }
+
+  .canvas-toolsbar .tool-row {
+    flex: 1 1 100%;
+  }
+
+  .canvas-ep-head {
+    flex: 0 0 170px;
+  }
+
+  .canvas-toolsbar .hint {
+    font-size: 0.74rem;
   }
 }
 

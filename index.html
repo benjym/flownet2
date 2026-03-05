@@ -52,21 +52,6 @@
         </section>
 
         <section class="group">
-          <h2>Drawing Tools</h2>
-          <div class="tool-row" id="toolRow">
-            <button data-tool="select" class="is-active">Select</button>
-            <button data-tool="equipotential">EP line</button>
-            <button data-tool="phreatic">Phreatic</button>
-            <button data-tool="noflow-line">No-flow line</button>
-            <button data-tool="noflow-zone">No-flow polygon</button>
-            <button data-tool="standpipe">Standpipe</button>
-          </div>
-          <label>New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
-          <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
-          <p id="toolStep" class="hint step-hint"></p>
-        </section>
-
-        <section class="group">
           <h2>Solver + Display</h2>
           <div class="grid two-col">
             <label>Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
@@ -136,6 +121,19 @@
             <button id="panModeBtn" type="button">Pan: Off</button>
             <span id="zoomLabel" class="zoom-label">100%</span>
           </div>
+        </div>
+        <div class="canvas-toolsbar">
+          <div class="tool-row" id="toolRow">
+            <button data-tool="select" class="is-active">Select</button>
+            <button data-tool="equipotential">EP</button>
+            <button data-tool="noflow-line">FL</button>
+            <button data-tool="phreatic">Phreatic</button>
+            <button data-tool="noflow-zone">Impermeable Area</button>
+            <button data-tool="standpipe">Standpipe</button>
+          </div>
+          <label id="newHeadWrap" class="canvas-ep-head is-hidden">New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
+          <p id="toolHint" class="hint">Select and drag endpoints/lines/polygons to edit geometry and BCs.</p>
+          <p id="toolStep" class="hint step-hint"></p>
         </div>
         <canvas id="flowCanvas"></canvas>
       </main>
