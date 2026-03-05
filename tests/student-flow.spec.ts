@@ -115,7 +115,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(standpipe).toContainText('water rise');
 
     const downloadPromise = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Download PNG' }).click();
+    await page.getByRole('button', { name: 'Save PNG' }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^flownet-.*\.png$/);
 
