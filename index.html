@@ -40,7 +40,7 @@
         </section>
 
         <section class="group">
-          <h2>Domain + Material</h2>
+          <h2>Settings</h2>
           <div class="grid two-col">
             <label>Width (m)<input id="domainWidth" type="number" min="5" step="1" value="30"></label>
             <label>Height (m)<input id="domainHeight" type="number" min="3" step="1" value="12"></label>
@@ -48,15 +48,9 @@
             <label>Grid cells in Y<input id="gridNy" type="number" min="11" max="201" step="2" value="41"></label>
             <label>Kx<input id="kx" type="number" min="0.01" step="0.1" value="1"></label>
             <label>Ky<input id="ky" type="number" min="0.01" step="0.1" value="1"></label>
-          </div>
-        </section>
-
-        <section class="group">
-          <h2>Solver + Display</h2>
-          <div class="grid two-col">
-            <label>Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
-            <label>Tolerance<input id="tolerance" type="number" min="0.000001" step="0.00001" value="0.0001"></label>
-            <label>SOR omega<input id="omega" type="number" min="1" max="1.95" step="0.05" value="1.6"></label>
+            <label class="is-hidden" aria-hidden="true">Max iterations<input id="maxIter" type="number" min="200" step="200" value="4000"></label>
+            <label class="is-hidden" aria-hidden="true">Tolerance<input id="tolerance" type="number" min="0.000001" step="0.00001" value="0.0001"></label>
+            <label class="is-hidden" aria-hidden="true">SOR omega<input id="omega" type="number" min="1" max="1.95" step="0.05" value="1.6"></label>
             <label>Equipotentials (interior)<input id="contours" type="number" min="3" max="30" step="1" value="14"></label>
             <label>Flow lines (interior)<input id="streamlines" type="number" min="4" max="36" step="1" value="12"></label>
             <label>Coordinates
