@@ -10,8 +10,8 @@
 
   --bg-1: #eef5f4;
   --bg-2: #d8e4ef;
-  --panel: #fbf8f1;
-  --panel-border: #d7d4c6;
+  --panel: #f7f7f7;
+  --panel-border: #d5d5d5;
   --ink: #122431;
   --ink-soft: #41596a;
   --accent: #0f766e;
@@ -83,7 +83,7 @@ body {
   font-size: 0.82rem;
 }
 
-.quick-start li + li {
+.quick-start li+li {
   margin-top: 0.2rem;
 }
 
@@ -257,7 +257,7 @@ button.danger {
   font-size: 0.8rem;
 }
 
-.group li + li {
+.group li+li {
   margin-top: 0.22rem;
 }
 
@@ -302,8 +302,8 @@ button.danger {
   gap: 0.45rem;
   min-height: 36px;
   padding: 0.35rem 0.65rem;
-  border-bottom: 1px solid #c9d8e2;
-  background: linear-gradient(180deg, #f5fbff, #e7f1f8);
+  border-bottom: 1px solid #e3e3e3;
+  background: linear-gradient(180deg, #eff5f9, #f1f1f1);
 }
 
 .canvas-toolbar p {

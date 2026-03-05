@@ -182,27 +182,28 @@ const EXAMPLE_PRESETS: ExamplePreset[] = [
   {
     id: 'earth-dam',
     label: 'Flow Through Earth Dam',
-    summary: 'Upstream/downstream heads with a phreatic surface and an impermeable central core polygon.',
+    summary:
+      'Upstream reservoir head, downstream tailwater, and a user-drawn phreatic line over a compact impervious cutoff.',
     domain: { width: 45, height: 16 },
     solver: { nx: 101, ny: 51, kx: 1, ky: 1, maxIter: 5000, tolerance: 1e-4, omega: 1.6 },
     view: { contours: 16, streamlines: 14, autoSolve: true, coordinateMode: 'real' },
     newHead: 10,
     lines: [
-      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 16 }, head: 13 },
-      { kind: 'equipotential', p1: { x: 45, y: 0 }, p2: { x: 45, y: 16 }, head: 3 },
-      { kind: 'phreatic', p1: { x: 4, y: 13.8 }, p2: { x: 36, y: 9.6 } },
+      { kind: 'equipotential', p1: { x: 0, y: 0 }, p2: { x: 0, y: 13.5 }, head: 13.5 },
+      { kind: 'equipotential', p1: { x: 45, y: 0 }, p2: { x: 45, y: 2.2 }, head: 2.2 },
+      { kind: 'phreatic', p1: { x: 2.8, y: 13.1 }, p2: { x: 35.8, y: 2.8 } },
     ],
     polygons: [
       {
         vertices: [
-          { x: 20, y: 0 },
-          { x: 25, y: 0 },
-          { x: 27.2, y: 9.2 },
-          { x: 17.8, y: 9.2 },
+          { x: 20.5, y: 0 },
+          { x: 24.5, y: 0 },
+          { x: 23.2, y: 5.4 },
+          { x: 21.8, y: 5.4 },
         ],
       },
     ],
-    standpipePoint: { x: 28, y: 7.4 },
+    standpipePoint: { x: 30, y: 4.8 },
   },
   {
     id: 'cutoff-wall',
@@ -328,7 +329,7 @@ const deleteBtn = byId<HTMLButtonElement>('deleteBtn');
 const toolRow = byId<HTMLDivElement>('toolRow');
 const inventorySummary = byId<HTMLParagraphElement>('inventorySummary');
 const inventoryList = byId<HTMLDivElement>('inventoryList');
-// const canvasPrompt = byId<HTMLParagraphElement>('canvasPrompt');
+const canvasPrompt = byId<HTMLParagraphElement>('canvasPrompt');
 const zoomInBtn = byId<HTMLButtonElement>('zoomInBtn');
 const zoomOutBtn = byId<HTMLButtonElement>('zoomOutBtn');
 const fitViewBtn = byId<HTMLButtonElement>('fitViewBtn');
@@ -2291,6 +2292,7 @@ function render(): void {
   const rect = canvas.getBoundingClientRect();
   const view = getCanvasView();
   const viewport = view.viewport;
+  updateCanvasPrompt(view);
 
   ctx.clearRect(0, 0, rect.width, rect.height);
 
@@ -2323,6 +2325,16 @@ function render(): void {
 
   drawDomainOutline(view);
   drawSelectionHandles(view);
+}
+
+function updateCanvasPrompt(view: CanvasView): void {
+  const displayBounds = mapBoundsToDisplay(view.bounds);
+  const xMin = displayBounds.xMin.toFixed(1);
+  const xMax = (displayBounds.xMin + displayBounds.width).toFixed(1);
+  const yMin = displayBounds.yMin.toFixed(1);
+  const yMax = (displayBounds.yMin + displayBounds.height).toFixed(1);
+  const modeLabel = state.view.coordinateMode === 'transformed' ? 'transformed' : 'real';
+  canvasPrompt.textContent = `View x:${xMin}-${xMax}m y:${yMin}-${yMax}m | coords: ${modeLabel}`;
 }
 
 function drawDomainOutline(view: CanvasView): void {
