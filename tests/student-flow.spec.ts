@@ -49,6 +49,14 @@ test.describe('Flow Net Studio student workflow', () => {
     return [Number(match[1]), Number(match[2])];
   };
 
+  const parseStandpipePoint = (text: string): [number, number] => {
+    const match = text.match(/Point \(([-0-9.]+)m, ([-0-9.]+)m\):/);
+    if (!match) {
+      throw new Error(`Unable to parse standpipe point from: ${text}`);
+    }
+    return [Number(match[1]), Number(match[2])];
+  };
+
   test('student can draw BCs, solve, probe with standpipe, and export PNG', async ({ page }) => {
     await page.goto('/');
 
@@ -219,6 +227,37 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.mouse.move(box.x - 20, box.y - 20);
     await expect(page.locator('#cursorReadout')).toHaveText('x: -, y: -');
+  });
+
+  test('standpipe can be repositioned by click-drag', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+
+    await page.getByRole('button', { name: 'Standpipe' }).click();
+    await page.mouse.click(point(0.3, 0.6).x, point(0.3, 0.6).y);
+
+    const beforeText = (await page.locator('#standpipeText').innerText()).trim();
+    const [beforeX] = parseStandpipePoint(beforeText);
+
+    await page.mouse.move(point(0.3, 0.6).x, point(0.3, 0.6).y);
+    await page.mouse.down();
+    await page.mouse.move(point(0.7, 0.45).x, point(0.7, 0.45).y);
+    await page.mouse.up();
+
+    const afterText = (await page.locator('#standpipeText').innerText()).trim();
+    const [afterX] = parseStandpipePoint(afterText);
+    expect(afterX).toBeGreaterThan(beforeX + 1);
   });
 
   test('Delete key removes selected boundary from inventory', async ({ page }) => {

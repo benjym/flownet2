@@ -116,7 +116,8 @@ type DragState =
   | { type: 'pan'; startScreen: Point; startCenter: Point }
   | { type: 'polygon-move'; id: number; startPointer: Point; startVertices: Point[] }
   | { type: 'polygon-vertex'; id: number; vertexIndex: number }
-  | { type: 'polygon-draw'; start: Point; current: Point };
+  | { type: 'polygon-draw'; start: Point; current: Point }
+  | { type: 'standpipe-move' };
 
 interface Viewport {
   left: number;
@@ -916,6 +917,7 @@ function onPointerDown(event: PointerEvent): void {
 
   if (state.tool === 'standpipe') {
     state.standpipePoint = point;
+    state.drag = { type: 'standpipe-move' };
     updateStandpipeReading();
     updateGuidanceUI();
     render();
@@ -998,6 +1000,16 @@ function onPointerMove(event: PointerEvent): void {
     updateGuidanceUI();
     render();
     updateCanvasCursor(state.hoverPoint);
+    return;
+  }
+
+  if (state.drag.type === 'standpipe-move') {
+    const draggedPoint = clampPoint(screenToWorld(screenPoint, view));
+    state.hoverPoint = draggedPoint;
+    state.standpipePoint = draggedPoint;
+    updateStandpipeReading();
+    render();
+    updateCanvasCursor(draggedPoint);
     return;
   }
 
@@ -1137,7 +1149,7 @@ function onPointerUp(event: PointerEvent): void {
 }
 
 function onPointerLeave(): void {
-  if (state.drag.type === 'polygon-draw') {
+  if (state.drag.type === 'polygon-draw' || state.drag.type === 'standpipe-move') {
     return;
   }
   state.hoverPoint = null;
@@ -1537,8 +1549,8 @@ function updateCanvasCursor(point = state.hoverPoint): void {
       mode = 'move';
     }
   } else if (state.tool === 'standpipe') {
-    cursor = 'crosshair';
-    mode = 'standpipe';
+    cursor = state.drag.type === 'standpipe-move' ? 'grabbing' : 'crosshair';
+    mode = state.drag.type === 'standpipe-move' ? 'standpipe-drag' : 'standpipe';
   } else {
     cursor = 'crosshair';
     mode = 'draw';
@@ -1662,7 +1674,7 @@ function updateGuidanceUI(): void {
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
     'noflow-line': 'Draw an impermeable no-flow line.',
     'noflow-zone': 'Draw an impermeable no-flow polygon.',
-    standpipe: 'Place standpipe points to read pressure head and rise.',
+    standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
   toolHint.textContent = hints[state.tool];
 
@@ -1681,7 +1693,7 @@ function updateGuidanceUI(): void {
       ? 'Step 2 of 2: drag and release to set initial polygon size. Press Esc to cancel.'
       : 'Step 1 of 2: click and drag to create an initial polygon.';
   } else {
-    stepText = 'Step 1 of 1: click inside active soil to place a standpipe.';
+    stepText = 'Step 1 of 1: click or drag inside active soil to place/move the standpipe.';
   }
 
   toolStep.textContent = stepText;
@@ -2429,6 +2441,8 @@ function render(): void {
   updateCanvasPrompt(view);
   updateCursorReadout();
 
+  ctx.font = '500 14px "Montserrat", sans-serif';
+
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   const bg = ctx.createLinearGradient(0, 0, rect.width, rect.height);
@@ -2487,7 +2501,6 @@ function drawDomainOutline(view: CanvasView): void {
   ctx.strokeRect(viewport.left, viewport.top, viewport.width, viewport.height);
 
   ctx.fillStyle = '#102332';
-  ctx.font = '12px "Trebuchet MS", "Gill Sans", sans-serif';
   const xMin = displayBounds.xMin.toFixed(1);
   const xMax = (displayBounds.xMin + displayBounds.width).toFixed(1);
   const yMax = (displayBounds.yMin + displayBounds.height).toFixed(1);
@@ -2602,6 +2615,39 @@ function drawNoFlowPolygons(view: CanvasView): void {
   });
 }
 
+function placeLabelNearAnchor(
+  text: string,
+  anchor: Point,
+  view: CanvasView,
+  options?: { offsetX?: number; offsetY?: number; downOffset?: number; margin?: number },
+): Point {
+  const offsetX = options?.offsetX ?? 6;
+  const offsetY = options?.offsetY ?? 6;
+  const downOffset = options?.downOffset ?? 14;
+  const margin = options?.margin ?? 8;
+  const right = view.viewport.left + view.viewport.width;
+  const bottom = view.viewport.top + view.viewport.height;
+
+  const metrics = ctx.measureText(text);
+  const textWidth = metrics.width;
+  const ascent = metrics.actualBoundingBoxAscent || 8;
+  const descent = metrics.actualBoundingBoxDescent || 3;
+
+  let x = anchor.x + offsetX;
+  if (x + textWidth > right - margin) {
+    x = anchor.x - offsetX - textWidth;
+  }
+  x = clamp(x, view.viewport.left + margin, right - margin - textWidth);
+
+  let y = anchor.y - offsetY;
+  if (y - ascent < view.viewport.top + margin) {
+    y = anchor.y + downOffset;
+  }
+  y = clamp(y, view.viewport.top + margin + ascent, bottom - margin - descent);
+
+  return { x, y };
+}
+
 function drawBoundaries(view: CanvasView): void {
   state.lineBoundaries.forEach((line) => {
     const lineVertices = getLineVertices(line);
@@ -2616,11 +2662,11 @@ function drawBoundaries(view: CanvasView): void {
     } else if (line.kind === 'phreatic') {
       ctx.setLineDash([7, 5]);
       ctx.strokeStyle = RENDER_STYLE.phreaticColor;
-      ctx.lineWidth = 2.2;
+      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
     } else {
       ctx.setLineDash([]);
       ctx.strokeStyle = RENDER_STYLE.noFlowColor;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
     }
 
     const first = worldToScreen(lineVertices[0], view);
@@ -2635,15 +2681,17 @@ function drawBoundaries(view: CanvasView): void {
 
     const mid = worldToScreen(samplePointOnPolyline(lineVertices, 0.5), view);
     ctx.fillStyle = '#111827';
-    ctx.font = '11px "Trebuchet MS", "Gill Sans", sans-serif';
+    let label = '';
 
     if (line.kind === 'equipotential') {
-      ctx.fillText(`EP ${line.head.toFixed(1)}m`, mid.x + 6, mid.y - 6);
+      label = `EP ${line.head.toFixed(1)}m`;
     } else if (line.kind === 'phreatic') {
-      ctx.fillText('Phreatic', mid.x + 6, mid.y - 6);
+      label = 'Phreatic';
     } else {
-      ctx.fillText('No-flow', mid.x + 6, mid.y - 6);
+      label = 'No-flow';
     }
+    const labelPos = placeLabelNearAnchor(label, mid, view);
+    ctx.fillText(label, labelPos.x, labelPos.y);
   });
 }
 
@@ -2674,7 +2722,6 @@ function drawHeadColorbar(view: CanvasView, solution: Solution): void {
   ctx.strokeRect(x, y, barWidth, barHeight);
 
   ctx.fillStyle = '#f8fafc';
-  ctx.font = '11px "Trebuchet MS", "Gill Sans", sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(`${maxHead.toFixed(2)} m`, x + barWidth + 7, y + 1);
@@ -2733,28 +2780,62 @@ function drawStandpipe(view: CanvasView): void {
   ctx.arc(p.x, p.y, 4.2, 0, Math.PI * 2);
   ctx.fill();
 
+  const waterYWorld = state.standpipeReading
+    ? clamp(state.standpipeReading.head, 0, state.domain.height)
+    : state.standpipePoint.y;
+  const waterPt = worldToScreen({ x: state.standpipePoint.x, y: waterYWorld }, view);
+
+  const tubeX = p.x + 18;
+  const tubeHalfWidth = 5;
+  const leftX = tubeX - tubeHalfWidth;
+  const rightX = tubeX + tubeHalfWidth;
+  const topY = Math.min(waterPt.y, p.y) - 12;
+  const bottomY = Math.max(p.y + 22, waterPt.y + 10);
+
+  const waterY = clamp(waterPt.y, topY + 1, bottomY - 1);
+  const innerLeft = leftX + 1.2;
+  const innerWidth = (rightX - leftX) - 2.4;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(innerLeft, topY + 1, innerWidth, Math.max(0, waterY - topY - 1));
+
+  ctx.fillStyle = '#0ea5e9';
+  ctx.fillRect(innerLeft, waterY, innerWidth, Math.max(0, bottomY - waterY - 1));
+
+  ctx.strokeStyle = '#0ea5e9';
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(tubeX, p.y);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(leftX + 1, waterY);
+  ctx.lineTo(rightX - 1, waterY);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(leftX, topY);
+  ctx.lineTo(leftX, bottomY);
+  ctx.moveTo(rightX, topY);
+  ctx.lineTo(rightX, bottomY);
+  ctx.stroke();
+
   if (!state.standpipeReading) {
     return;
   }
 
-  const waterYWorld = clamp(state.standpipeReading.head, 0, state.domain.height);
-  const waterPt = worldToScreen({ x: state.standpipePoint.x, y: waterYWorld }, view);
-
-  ctx.strokeStyle = '#0ea5e9';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(p.x, p.y);
-  ctx.lineTo(waterPt.x, waterPt.y);
-  ctx.stroke();
-
-  ctx.fillStyle = '#0ea5e9';
-  ctx.beginPath();
-  ctx.arc(waterPt.x, waterPt.y, 3.8, 0, Math.PI * 2);
-  ctx.fill();
-
   ctx.fillStyle = '#0f172a';
-  ctx.font = '12px "Trebuchet MS", "Gill Sans", sans-serif';
-  ctx.fillText(`h=${state.standpipeReading.head.toFixed(2)}m`, waterPt.x + 8, waterPt.y - 8);
+  const standpipeLabel = `h=${state.standpipeReading.head.toFixed(2)}m`;
+  const standpipeLabelPos = placeLabelNearAnchor(
+    standpipeLabel,
+    { x: rightX, y: topY },
+    view,
+    { offsetX: 8, offsetY: 3, downOffset: 16 },
+  );
+  ctx.fillText(standpipeLabel, standpipeLabelPos.x, standpipeLabelPos.y);
 }
 
 function drawSelection(view: CanvasView): void {

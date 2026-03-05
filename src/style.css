@@ -22,8 +22,8 @@
   --phreatic: #1d4ed8;
   --no-flow: #ffffff;
   --soil: #8f6b43;
-  --flow-line-width: 2.4;
-  --equipotential-width: 2.8;
+  --flow-line-width: 3;
+  --equipotential-width: 3;
 }
 
 * {

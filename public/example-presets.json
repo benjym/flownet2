@@ -56,6 +56,204 @@
     ]
   },
   {
+    "id": "drain",
+    "label": "Flow Into Drain",
+    "summary": "Regional gradient with a low-head drain and an impermeable lens that funnels flow downward.",
+    "domain": {
+      "width": 32,
+      "height": 12
+    },
+    "solver": {
+      "nx": 91,
+      "ny": 41,
+      "kx": 1,
+      "ky": 1,
+      "maxIter": 5000,
+      "tolerance": 0.0001,
+      "omega": 1.6
+    },
+    "view": {
+      "contours": 15,
+      "streamlines": 16,
+      "autoSolve": true,
+      "coordinateMode": "real",
+      "showHeadMap": false
+    },
+    "newHead": 8,
+    "lines": [
+      {
+        "kind": "equipotential",
+        "head": 14.5,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 12
+          },
+          {
+            "x": 32,
+            "y": 12
+          }
+        ]
+      },
+      {
+        "kind": "equipotential",
+        "head": 2.1,
+        "vertices": [
+          {
+            "x": 13.8,
+            "y": 2.4
+          },
+          {
+            "x": 18.6,
+            "y": 2.4
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sheet-pile",
+    "label": "Seepage Beneath Sheet Pile",
+    "summary": "A thin sheet-pile polygon interrupts shallow flow and bends equipotentials below its tip.",
+    "domain": {
+      "width": 40,
+      "height": 12
+    },
+    "solver": {
+      "nx": 101,
+      "ny": 41,
+      "kx": 1,
+      "ky": 1,
+      "maxIter": 5200,
+      "tolerance": 0.0001,
+      "omega": 1.65
+    },
+    "view": {
+      "contours": 16,
+      "streamlines": 14,
+      "autoSolve": true,
+      "coordinateMode": "real",
+      "showHeadMap": false
+    },
+    "newHead": 9,
+    "lines": [
+      {
+        "kind": "equipotential",
+        "head": 12,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 12
+          }
+        ]
+      },
+      {
+        "kind": "equipotential",
+        "head": 0,
+        "vertices": [
+          {
+            "x": 40,
+            "y": 0
+          },
+          {
+            "x": 40,
+            "y": 12
+          }
+        ]
+      }
+    ],
+    "polygons": [
+      {
+        "vertices": [
+          {
+            "x": 19.7,
+            "y": 12
+          },
+          {
+            "x": 20.3,
+            "y": 12
+          },
+          {
+            "x": 20.3,
+            "y": 5.3
+          },
+          {
+            "x": 19.7,
+            "y": 5.3
+          }
+        ]
+      }
+    ],
+    "standpipePoint": {
+      "x": 24,
+      "y": 5.4
+    }
+  },
+  {
+    "id": "anisotropic-demo",
+    "label": "Anisotropic Classroom Demo",
+    "summary": "Same boundary heads with Kx > Ky to illustrate non-orthogonal EP/flow-line behavior.",
+    "domain": {
+      "width": 30,
+      "height": 12
+    },
+    "solver": {
+      "nx": 81,
+      "ny": 41,
+      "kx": 4,
+      "ky": 1,
+      "maxIter": 4500,
+      "tolerance": 0.0001,
+      "omega": 1.6
+    },
+    "view": {
+      "contours": 14,
+      "streamlines": 12,
+      "autoSolve": true,
+      "coordinateMode": "real",
+      "showHeadMap": false
+    },
+    "newHead": 8,
+    "lines": [
+      {
+        "kind": "equipotential",
+        "head": 10,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 12
+          }
+        ]
+      },
+      {
+        "kind": "equipotential",
+        "head": 2,
+        "vertices": [
+          {
+            "x": 30,
+            "y": 0
+          },
+          {
+            "x": 30,
+            "y": 12
+          }
+        ]
+      }
+    ],
+    "standpipePoint": {
+      "x": 15,
+      "y": 6
+    }
+  },
+  {
     "id": "earth-dam",
     "label": "Flow Through Earth Dam",
     "summary": "Upstream reservoir head, downstream tailwater, and a user-drawn phreatic line over a compact impervious cutoff.",
@@ -181,203 +379,5 @@
         ]
       }
     ]
-  },
-  {
-    "id": "drain",
-    "label": "Flow Into Drain",
-    "summary": "Regional gradient with a low-head drain and an impermeable lens that funnels flow downward.",
-    "domain": {
-      "width": 32,
-      "height": 12
-    },
-    "solver": {
-      "nx": 91,
-      "ny": 41,
-      "kx": 1,
-      "ky": 1,
-      "maxIter": 5000,
-      "tolerance": 0.0001,
-      "omega": 1.6
-    },
-    "view": {
-      "contours": 15,
-      "streamlines": 16,
-      "autoSolve": true,
-      "coordinateMode": "real",
-      "showHeadMap": false
-    },
-    "newHead": 8,
-    "lines": [
-      {
-        "kind": "equipotential",
-        "head": 14.5,
-        "vertices": [
-          {
-            "x": 0,
-            "y": 12
-          },
-          {
-            "x": 32,
-            "y": 12
-          }
-        ]
-      },
-      {
-        "kind": "equipotential",
-        "head": 2.1,
-        "vertices": [
-          {
-            "x": 13.8,
-            "y": 2.4
-          },
-          {
-            "x": 18.6,
-            "y": 2.4
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "sheet-pile",
-    "label": "Seepage Beneath Sheet Pile",
-    "summary": "A thin sheet-pile polygon interrupts shallow flow and bends equipotentials below its tip.",
-    "domain": {
-      "width": 40,
-      "height": 12
-    },
-    "solver": {
-      "nx": 101,
-      "ny": 41,
-      "kx": 1,
-      "ky": 1,
-      "maxIter": 5200,
-      "tolerance": 0.0001,
-      "omega": 1.65
-    },
-    "view": {
-      "contours": 16,
-      "streamlines": 14,
-      "autoSolve": true,
-      "coordinateMode": "real",
-      "showHeadMap": false
-    },
-    "newHead": 9,
-    "lines": [
-      {
-        "kind": "equipotential",
-        "head": 10.5,
-        "vertices": [
-          {
-            "x": 0,
-            "y": 0
-          },
-          {
-            "x": 0,
-            "y": 12
-          }
-        ]
-      },
-      {
-        "kind": "equipotential",
-        "head": 3,
-        "vertices": [
-          {
-            "x": 40,
-            "y": 0
-          },
-          {
-            "x": 40,
-            "y": 12
-          }
-        ]
-      }
-    ],
-    "polygons": [
-      {
-        "vertices": [
-          {
-            "x": 19.7,
-            "y": 12
-          },
-          {
-            "x": 20.3,
-            "y": 12
-          },
-          {
-            "x": 20.3,
-            "y": 5.3
-          },
-          {
-            "x": 19.7,
-            "y": 5.3
-          }
-        ]
-      }
-    ],
-    "standpipePoint": {
-      "x": 24,
-      "y": 5.4
-    }
-  },
-  {
-    "id": "anisotropic-demo",
-    "label": "Anisotropic Classroom Demo",
-    "summary": "Same boundary heads with Kx > Ky to illustrate non-orthogonal EP/flow-line behavior.",
-    "domain": {
-      "width": 30,
-      "height": 12
-    },
-    "solver": {
-      "nx": 81,
-      "ny": 41,
-      "kx": 4,
-      "ky": 1,
-      "maxIter": 4500,
-      "tolerance": 0.0001,
-      "omega": 1.6
-    },
-    "view": {
-      "contours": 14,
-      "streamlines": 12,
-      "autoSolve": true,
-      "coordinateMode": "real",
-      "showHeadMap": false
-    },
-    "newHead": 8,
-    "lines": [
-      {
-        "kind": "equipotential",
-        "head": 10,
-        "vertices": [
-          {
-            "x": 0,
-            "y": 0
-          },
-          {
-            "x": 0,
-            "y": 12
-          }
-        ]
-      },
-      {
-        "kind": "equipotential",
-        "head": 2,
-        "vertices": [
-          {
-            "x": 30,
-            "y": 0
-          },
-          {
-            "x": 30,
-            "y": 12
-          }
-        ]
-      }
-    ],
-    "standpipePoint": {
-      "x": 15,
-      "y": 6
-    }
   }
 ]
