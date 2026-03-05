@@ -294,16 +294,16 @@ test.describe('Flow Net Studio student workflow', () => {
   });
 
   test('url parameter loads canonical example case', async ({ page }) => {
-    const cutoffWallPreset = presetFor('cutoff-wall');
-    await page.goto('/?example=cutoff-wall');
+    const drainPreset = presetFor('drain');
+    await page.goto('/?example=drain');
 
-    await expect(page.locator('#exampleSelect')).toHaveValue('cutoff-wall');
-    await expect(page.locator('#exampleSummary')).toContainText(cutoffWallPreset.label);
-    await expect(page.locator('#domainWidth')).toHaveValue(String(cutoffWallPreset.domain.width));
+    await expect(page.locator('#exampleSelect')).toHaveValue('drain');
+    await expect(page.locator('#exampleSummary')).toContainText(drainPreset.label);
+    await expect(page.locator('#domainWidth')).toHaveValue(String(drainPreset.domain.width));
     await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(presetLineCount(cutoffWallPreset), presetPolygonCount(cutoffWallPreset)),
+      inventorySummaryText(presetLineCount(drainPreset), presetPolygonCount(drainPreset)),
     );
-    if (presetPolygonCount(cutoffWallPreset) > 0) {
+    if (presetPolygonCount(drainPreset) > 0) {
       await expect(page.getByRole('button', { name: /No-flow polygon #/ })).toBeVisible();
     }
   });
