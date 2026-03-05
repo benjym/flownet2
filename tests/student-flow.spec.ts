@@ -103,7 +103,6 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.getByRole('button', { name: 'Standpipe' }).click();
     await page.mouse.click(point(0.52, 0.45).x, point(0.52, 0.45).y);
 
-    await page.getByRole('button', { name: 'Solve now' }).click();
     await expect(page.locator('#statusText')).toContainText('Solved');
 
     const standpipe = page.locator('#standpipeText');

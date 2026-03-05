@@ -60,14 +60,13 @@
               </select>
             </label>
             <label class="inline-check"><input id="showHeadMap" type="checkbox">Show head values</label>
-            <label class="inline-check"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
+            <label class="inline-check is-hidden" aria-hidden="true"><input id="autoSolve" type="checkbox" checked>Auto-solve</label>
           </div>
           <div class="action-row">
-            <button id="solveBtn">Solve now</button>
+            <button id="solveBtn" class="is-hidden" aria-hidden="true">Solve now</button>
             <button id="exportBtn">Download PNG</button>
             <button id="saveStateBtn">Save state</button>
             <button id="loadStateBtn">Load file</button>
-            <button id="deleteBtn" class="danger">Delete selected</button>
           </div>
           <input id="loadStateInput" type="file" accept=".json,.flownet2,application/json" hidden>
           <p id="statusText" class="status">Waiting for first solve.</p>
@@ -77,6 +76,7 @@
           <h2>Selected Item</h2>
           <p id="selectionType">Nothing selected.</p>
           <label id="selectedHeadRow" class="is-hidden">EP head (m)<input id="selectedHead" type="number" step="0.1" value="8"></label>
+          <button id="deleteBtn" class="danger is-hidden">Delete selected</button>
         </section>
 
         <section class="group">
