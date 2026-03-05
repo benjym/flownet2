@@ -407,3 +407,22 @@ button.danger {
     min-width: 2.15rem;
   }
 }
+
+a {
+  font-weight: bold;
+  color: #111111;
+}
+
+#benjy {
+  position: fixed;
+  bottom: 5pt;
+  right: 5pt;
+  font-size: 8pt;
+  z-index: 99;
+  background-color: #ffffff;
+  padding: 5pt;
+  border-radius: 5pt;
+  color: #111111;
+  user-select: none;
+  opacity: 0.8;
+}
