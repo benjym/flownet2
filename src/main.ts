@@ -1813,6 +1813,7 @@ function updateSelectionPanel(): void {
   if (!state.selected) {
     selectionType.textContent = 'Nothing selected.';
     selectedHeadRow.classList.add('is-hidden');
+    deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
@@ -1823,6 +1824,7 @@ function updateSelectionPanel(): void {
     if (!line) {
       selectionType.textContent = 'Nothing selected.';
       selectedHeadRow.classList.add('is-hidden');
+      deleteBtn.classList.add('is-hidden');
       updateBoundaryInventory();
       updateGuidanceUI();
       return;
@@ -1839,6 +1841,7 @@ function updateSelectionPanel(): void {
     } else {
       selectedHeadRow.classList.add('is-hidden');
     }
+    deleteBtn.classList.remove('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
@@ -1848,12 +1851,14 @@ function updateSelectionPanel(): void {
   if (!polygon) {
     selectionType.textContent = 'Nothing selected.';
     selectedHeadRow.classList.add('is-hidden');
+    deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
   }
   selectionType.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
   selectedHeadRow.classList.add('is-hidden');
+  deleteBtn.classList.remove('is-hidden');
   updateBoundaryInventory();
   updateGuidanceUI();
 }
