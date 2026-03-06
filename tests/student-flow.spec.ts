@@ -274,6 +274,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const flTool = page.locator('#toolRow button[data-tool="noflow-line"]');
     const phreaticTool = page.locator('#toolRow button[data-tool="phreatic"]');
     const impermeableAreaTool = page.locator('#toolRow button[data-tool="noflow-zone"]');
+    const materialAreaTool = page.locator('#toolRow button[data-tool="material-zone"]');
     const standpipeTool = page.locator('#toolRow button[data-tool="standpipe"]');
 
     await expect(selectTool).toHaveAttribute('title', /Space/);
@@ -281,6 +282,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(flTool).toHaveAttribute('title', /\(F\)/);
     await expect(phreaticTool).toHaveAttribute('title', /\(P\)/);
     await expect(impermeableAreaTool).toHaveAttribute('title', /\(I\)/);
+    await expect(materialAreaTool).toHaveAttribute('title', /\(M\)/);
     await expect(standpipeTool).toHaveAttribute('title', /\(S\)/);
 
     await page.locator('#flowCanvas').click();
@@ -297,6 +299,11 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.keyboard.press('i');
     await expect(impermeableAreaTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newMaterialWrap')).toHaveClass(/is-hidden/);
+
+    await page.keyboard.press('m');
+    await expect(materialAreaTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
 
     await page.keyboard.press('s');
     await expect(standpipeTool).toHaveClass(/is-active/);
@@ -304,6 +311,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.keyboard.press('Space');
     await expect(selectTool).toHaveClass(/is-active/);
     await expect(page.locator('#newHeadWrap')).toHaveClass(/is-hidden/);
+    await expect(page.locator('#newMaterialWrap')).toHaveClass(/is-hidden/);
   });
 
   test('standpipe can be repositioned by click-drag', async ({ page }) => {
@@ -685,6 +693,46 @@ test.describe('Flow Net Studio student workflow', () => {
       buffer: Buffer.from(JSON.stringify(savedState)),
     });
     await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
+  });
+
+  test('material area tool creates a material region directly', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const point = (rx: number, ry: number) => ({
+      x: box!.x + box!.width * rx,
+      y: box!.y + box!.height * ry,
+    });
+
+    await page.locator('#toolRow button[data-tool="material-zone"]').click();
+    await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
+
+    const newMaterialKxInput = page.locator('#newMaterialKx');
+    const newMaterialKyInput = page.locator('#newMaterialKy');
+    await newMaterialKxInput.fill('7');
+    await newMaterialKyInput.fill('3');
+
+    const polygonStart = point(0.34, 0.26);
+    const polygonEnd = point(0.49, 0.41);
+    await page.mouse.move(polygonStart.x, polygonStart.y);
+    await page.mouse.down();
+    await page.mouse.move(polygonEnd.x, polygonEnd.y);
+    await page.mouse.up();
+
+    await expect(page.locator('#inventorySummary')).toContainText('1 material region');
+    await expect(page.locator('#selectedPolygonMaterialToggleBtn')).toContainText('Set as impermeable');
+
+    const saveDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const saveDownload = await saveDownloadPromise;
+    const savePath = await saveDownload.path();
+    expect(savePath).not.toBeNull();
+    const savedState = JSON.parse(fs.readFileSync(savePath as string, 'utf8'));
+    expect(savedState.polygons[0].regionType).toBe('material');
+    expect(savedState.polygons[0].kx).toBe(7);
+    expect(savedState.polygons[0].ky).toBe(3);
   });
 
   test('student can load a saved state JSON file', async ({ page }) => {

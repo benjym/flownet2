@@ -107,9 +107,15 @@
               <button data-tool="noflow-line">FL</button>
               <button data-tool="phreatic">Phreatic</button>
               <button data-tool="noflow-zone">Impermeable Area</button>
+              <button data-tool="material-zone">Material Area</button>
               <button data-tool="standpipe">Standpipe</button>
             </div>
             <label id="newHeadWrap" class="canvas-ep-head is-hidden">New EP head (m)<input id="newHead" type="number" step="0.1" value="8"></label>
+            <div id="newMaterialWrap" class="canvas-material-wrap is-hidden">
+              <span>New material K</span>
+              <label>Kx<input id="newMaterialKx" type="number" min="0.01" step="0.1" value="1"></label>
+              <label>Ky<input id="newMaterialKy" type="number" min="0.01" step="0.1" value="1"></label>
+            </div>
           </div>
           <div class="canvas-toolbar-right">
             <span id="cursorReadout" class="cursor-readout">x: -, y: -</span>

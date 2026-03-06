@@ -399,6 +399,25 @@ button.danger {
   max-width: 100%;
 }
 
+.canvas-material-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 1 250px;
+  font-size: 0.78rem;
+  max-width: 100%;
+}
+
+.canvas-material-wrap label {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.canvas-material-wrap input {
+  width: 4.5rem;
+}
+
 .canvas-toolbar-right {
   display: flex;
   align-items: center;
@@ -663,6 +682,10 @@ button.danger {
 
   .canvas-ep-head {
     flex: 0 0 170px;
+  }
+
+  .canvas-material-wrap {
+    flex: 1 1 100%;
   }
 
   .canvas-guidance .hint {
