@@ -308,6 +308,16 @@ const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
 const MATERIAL_K_MIN = 0.01;
 const MATERIAL_K_MAX = 1000;
+const MATERIAL_COLOR_HUE_START = 215;
+const MATERIAL_COLOR_HUE_SPAN = 170;
+const MATERIAL_COLOR_SAT_START = 72;
+const MATERIAL_COLOR_SAT_SPAN = 14;
+const MATERIAL_COLOR_LIGHT_START = 80;
+const MATERIAL_COLOR_LIGHT_SPAN = 34;
+const ANISOTROPY_HATCH_THRESHOLD = 1.05;
+const HATCH_SPACING_BASE = 16;
+const HATCH_SPACING_LOG_SCALE = 1.8;
+const HATCH_SPACING_MIN = 8;
 
 wireControls();
 resizeCanvas();
@@ -1743,7 +1753,7 @@ function pointerWorldThreshold(): number {
   return basePixels * Math.max(worldPerPxX, worldPerPxY);
 }
 
-function eventToCanvasPoint(event: { clientX: number; clientY: number }): Point {
+function eventToCanvasPoint(event: MouseEvent | PointerEvent | WheelEvent): Point {
   const rect = canvas.getBoundingClientRect();
   return {
     x: event.clientX - rect.left,
@@ -1864,7 +1874,10 @@ function updateBoundaryInventory(): void {
   const noFlowPolygons = polygons.filter((polygon) => polygon.regionType !== 'material');
   const materialRegions = polygons.filter((polygon) => polygon.regionType === 'material');
 
-  inventorySummary.textContent = `${lines.length} line BCs + ${noFlowPolygons.length} no-flow polygons${materialRegions.length > 0 ? ` + ${materialRegions.length} material regions` : ''}`;
+  const materialSuffix = materialRegions.length > 0
+    ? ` + ${materialRegions.length} material ${materialRegions.length === 1 ? 'region' : 'regions'}`
+    : '';
+  inventorySummary.textContent = `${lines.length} line BCs + ${noFlowPolygons.length} no-flow polygons${materialSuffix}`;
   inventoryList.innerHTML = '';
 
   if (lines.length === 0 && polygons.length === 0) {
@@ -1972,7 +1985,7 @@ function updateBoundaryInventory(): void {
       button.classList.add('is-selected');
     }
     if (polygon.regionType === 'material') {
-      const anisotropy = polygon.kx / polygon.ky;
+      const anisotropy = polygon.kx / Math.max(polygon.ky, 1e-9);
       button.textContent = `Material region #${polygon.id} (Kx=${polygon.kx.toFixed(2)}, Ky=${polygon.ky.toFixed(2)}, Kx/Ky=${anisotropy.toFixed(2)})`;
     } else {
       button.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
@@ -2171,8 +2184,8 @@ function solveGroundwater(
   });
 
   materialPolygons.forEach((polygon) => {
-    const localKx = clamp(polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
-    const localKy = clamp(polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    const localKx = polygon.kx;
+    const localKy = polygon.ky;
     for (let j = 0; j < ny; j += 1) {
       for (let i = 0; i < nx; i += 1) {
         const point = { x: i * dx, y: j * dy };
@@ -3277,19 +3290,23 @@ function tracePolygonPath(vertices: Point[]): void {
 }
 
 function materialRegionColor(kx: number, ky: number): string {
-  const geometricMean = Math.sqrt(clamp(kx, MATERIAL_K_MIN, MATERIAL_K_MAX) * clamp(ky, MATERIAL_K_MIN, MATERIAL_K_MAX));
+  const clampedKx = clamp(kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+  const clampedKy = clamp(ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+  const geometricMean = Math.sqrt(clampedKx * clampedKy);
   const logMin = Math.log10(MATERIAL_K_MIN);
   const logMax = Math.log10(MATERIAL_K_MAX);
-  const t = clamp((Math.log10(geometricMean) - logMin) / Math.max(logMax - logMin, 1e-9), 0, 1);
-  const hue = 215 - 170 * t;
-  const saturation = 72 - 14 * t;
-  const lightness = 80 - 34 * t;
+  const t = clamp((Math.log10(geometricMean) - logMin) / (logMax - logMin), 0, 1);
+  const hue = MATERIAL_COLOR_HUE_START - MATERIAL_COLOR_HUE_SPAN * t;
+  const saturation = MATERIAL_COLOR_SAT_START - MATERIAL_COLOR_SAT_SPAN * t;
+  const lightness = MATERIAL_COLOR_LIGHT_START - MATERIAL_COLOR_LIGHT_SPAN * t;
   return `hsl(${hue} ${saturation}% ${lightness}%)`;
 }
 
 function drawMaterialAnisotropyHatch(vertices: Point[], kx: number, ky: number): void {
-  const anisotropy = Math.max(kx, ky) / Math.max(Math.min(kx, ky), 1e-9);
-  if (anisotropy < 1.05) {
+  const clampedKx = clamp(kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+  const clampedKy = clamp(ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+  const anisotropy = Math.max(clampedKx, clampedKy) / Math.min(clampedKx, clampedKy);
+  if (anisotropy < ANISOTROPY_HATCH_THRESHOLD) {
     return;
   }
   let minX = Number.POSITIVE_INFINITY;
@@ -3302,8 +3319,12 @@ function drawMaterialAnisotropyHatch(vertices: Point[], kx: number, ky: number):
     minY = Math.min(minY, vertex.y);
     maxY = Math.max(maxY, vertex.y);
   });
-  const span = Math.hypot(maxX - minX, maxY - minY);
-  const spacing = clamp(16 - 1.8 * Math.log(anisotropy), 8, 16);
+  const span = Math.max(maxX - minX, maxY - minY);
+  const spacing = clamp(
+    HATCH_SPACING_BASE - HATCH_SPACING_LOG_SCALE * Math.log(anisotropy),
+    HATCH_SPACING_MIN,
+    HATCH_SPACING_BASE,
+  );
   const direction = kx >= ky ? 1 : -1;
 
   ctx.save();

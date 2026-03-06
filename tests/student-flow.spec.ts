@@ -639,18 +639,18 @@ test.describe('Flow Net Studio student workflow', () => {
       y: box.y + box.height * ry,
     });
 
-    const start = point(0.42, 0.53);
-    const end = point(0.58, 0.68);
-    const center = point(0.5, 0.61);
+    const polygonStart = point(0.42, 0.53);
+    const polygonEnd = point(0.58, 0.68);
+    const polygonCenter = point(0.5, 0.61);
 
     await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
-    await page.mouse.move(start.x, start.y);
+    await page.mouse.move(polygonStart.x, polygonStart.y);
     await page.mouse.down();
-    await page.mouse.move(end.x, end.y);
+    await page.mouse.move(polygonEnd.x, polygonEnd.y);
     await page.mouse.up();
 
     await page.getByRole('button', { name: 'Select', exact: true }).click();
-    await page.mouse.click(center.x, center.y, { button: 'right' });
+    await page.mouse.click(polygonCenter.x, polygonCenter.y, { button: 'right' });
 
     await expect(page.locator('#selectedPolygonMaterialPanel')).not.toHaveClass(/is-hidden/);
     await expect(page.locator('#selectedPolygonMaterialToggleBtn')).toContainText('Convert to material');
@@ -663,7 +663,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await selectedKy.dispatchEvent('change');
     await page.locator('#selectedPolygonMaterialToggleBtn').click();
 
-    await expect(page.locator('#inventorySummary')).toContainText('1 material regions');
+    await expect(page.locator('#inventorySummary')).toContainText('1 material region');
     await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
 
     const saveDownloadPromise = page.waitForEvent('download');
@@ -678,6 +678,13 @@ test.describe('Flow Net Studio student workflow', () => {
     expect(savedState.polygons[0].regionType).toBe('material');
     expect(savedState.polygons[0].kx).toBe(9);
     expect(savedState.polygons[0].ky).toBe(1);
+
+    await page.setInputFiles('#loadStateInput', {
+      name: 'material-region-state.flownet2.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(savedState)),
+    });
+    await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
   });
 
   test('student can load a saved state JSON file', async ({ page }) => {
