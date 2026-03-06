@@ -286,6 +286,41 @@ button.danger {
   color: #657b8a;
 }
 
+.selected-region-panel {
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #c8d6df;
+  border-radius: 8px;
+  background: #edf4f8;
+}
+
+.selected-region-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #26475c;
+}
+
+.selected-region-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+.selected-region-row {
+  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.region-swatch {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 4px;
+  border: 1px solid #63798a;
+  background: #ffffff;
+  flex: 0 0 auto;
+}
+
 .is-hidden {
   display: none;
 }
