@@ -42,7 +42,7 @@ test.describe('Flow Net Studio student workflow', () => {
     let lines = 0;
     let noFlowPolygons = 0;
     let materialRegions = 0;
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < count; i++) {
       const text = (await items.nth(i).innerText()).trim();
       if (lineItemPattern.test(text)) {
         lines += 1;
