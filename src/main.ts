@@ -1303,10 +1303,14 @@ function onPointerUp(event: PointerEvent): void {
 
   if (point && state.drag.type === 'polygon-draw') {
     const isMaterialZone = state.tool === 'material-zone';
-    const materialKx = readNumber(newMaterialKxInput, state.solver.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
-    const materialKy = readNumber(newMaterialKyInput, state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
-    newMaterialKxInput.value = String(materialKx);
-    newMaterialKyInput.value = String(materialKy);
+    let materialKx = state.solver.kx;
+    let materialKy = state.solver.ky;
+    if (isMaterialZone) {
+      materialKx = readNumber(newMaterialKxInput, state.solver.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+      materialKy = readNumber(newMaterialKyInput, state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+      newMaterialKxInput.value = String(materialKx);
+      newMaterialKyInput.value = String(materialKy);
+    }
     const polygon = createPolygonFromDrag(
       state.drag.start,
       state.drag.current,

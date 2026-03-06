@@ -701,21 +701,18 @@ test.describe('Flow Net Studio student workflow', () => {
     const canvas = page.locator('#flowCanvas');
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
-    if (!box) {
-      throw new Error('Canvas bounding box was null');
-    }
     const point = (rx: number, ry: number) => ({
-      x: box.x + box.width * rx,
-      y: box.y + box.height * ry,
+      x: box!.x + box!.width * rx,
+      y: box!.y + box!.height * ry,
     });
 
     await page.locator('#toolRow button[data-tool="material-zone"]').click();
     await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
 
-    const newMaterialKx = page.locator('#newMaterialKx');
-    const newMaterialKy = page.locator('#newMaterialKy');
-    await newMaterialKx.fill('7');
-    await newMaterialKy.fill('3');
+    const newMaterialKxInput = page.locator('#newMaterialKx');
+    const newMaterialKyInput = page.locator('#newMaterialKy');
+    await newMaterialKxInput.fill('7');
+    await newMaterialKyInput.fill('3');
 
     const polygonStart = point(0.34, 0.26);
     const polygonEnd = point(0.49, 0.41);
@@ -732,10 +729,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const saveDownload = await saveDownloadPromise;
     const savePath = await saveDownload.path();
     expect(savePath).not.toBeNull();
-    if (!savePath) {
-      throw new Error('Save-state download path was null');
-    }
-    const savedState = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+    const savedState = JSON.parse(fs.readFileSync(savePath as string, 'utf8'));
     expect(savedState.polygons[0].regionType).toBe('material');
     expect(savedState.polygons[0].kx).toBe(7);
     expect(savedState.polygons[0].ky).toBe(3);

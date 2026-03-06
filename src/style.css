@@ -403,7 +403,7 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex: 0 0 250px;
+  flex: 0 1 250px;
   font-size: 0.78rem;
   max-width: 100%;
 }
