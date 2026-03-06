@@ -46,12 +46,14 @@ npm run build
 - `Phreatic`: fixed head equal to elevation
 - `No-flow line`: impermeable barrier
 - `No-flow polygon`: impermeable area (draw initial shape, then edit vertices)
+- Region materials: right-click a selected polygon to set local `Kx`/`Ky` (or keep it impermeable)
 - `Standpipe`: click to read head and water rise
 3. In `Select`, edit polygons:
 - Drag polygon vertices to reshape
 - `Alt` + click edge to insert a vertex
 - `Ctrl`/`Cmd` + click a vertex to delete it (minimum 3 kept)
   - Cursor shows `+`/`-` cues for add/remove while modifier keys are held
+  - Right-click a polygon to open region material controls (convert between impermeable and material region)
 4. Keep **Auto-solve** on, or click **Solve now**.
 5. Use **Boundary List** to select/edit items.
 6. Click **Download PNG** to save the visualization.
@@ -61,6 +63,8 @@ npm run build
 When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display to toggle between:
 - `Real (x, y)`
 - `Transformed (x', y')` where `x' = x*sqrt(Ky/Kx)` and `y' = y`
+
+Material regions are shaded by geometric-mean permeability (`sqrt(Kx*Ky)`), with hatch orientation cues when `Kx != Ky`.
 
 ## Precision Controls (Desktop + Mobile)
 

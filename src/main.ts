@@ -17,6 +17,9 @@ interface LineBoundary {
 interface NoFlowPolygon {
   id: number;
   vertices: Point[];
+  regionType: 'noflow' | 'material';
+  kx: number;
+  ky: number;
 }
 
 interface DomainSettings {
@@ -79,6 +82,9 @@ interface PresetLine {
 
 interface PresetPolygon {
   vertices: Point[];
+  regionType?: 'noflow' | 'material';
+  kx?: number;
+  ky?: number;
 }
 
 interface ExamplePreset {
@@ -219,6 +225,12 @@ const deleteBtn = byId<HTMLButtonElement>('deleteBtn');
 const toolRow = byId<HTMLDivElement>('toolRow');
 const inventorySummary = byId<HTMLParagraphElement>('inventorySummary');
 const inventoryList = byId<HTMLDivElement>('inventoryList');
+const selectedPolygonMaterialPanel = byId<HTMLDivElement>('selectedPolygonMaterialPanel');
+const selectedPolygonKxInput = byId<HTMLInputElement>('selectedPolygonKx');
+const selectedPolygonKyInput = byId<HTMLInputElement>('selectedPolygonKy');
+const selectedPolygonMaterialToggleBtn = byId<HTMLButtonElement>('selectedPolygonMaterialToggleBtn');
+const selectedPolygonMaterialText = byId<HTMLParagraphElement>('selectedPolygonMaterialText');
+const selectedPolygonSwatch = byId<HTMLSpanElement>('selectedPolygonSwatch');
 const fitViewBtn = byId<HTMLButtonElement>('fitViewBtn');
 const cursorReadout = byId<HTMLSpanElement>('cursorReadout');
 const guideToggleBtn = byId<HTMLButtonElement>('guideToggleBtn');
@@ -294,6 +306,8 @@ let lineInventoryDropTarget: LineInventoryDropTarget | null = null;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
+const MATERIAL_K_MIN = 0.01;
+const MATERIAL_K_MAX = 1000;
 
 wireControls();
 resizeCanvas();
@@ -475,6 +489,9 @@ function loadExampleById(
     state.polygons.push({
       id: state.nextId++,
       vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
+      regionType: polygon.regionType === 'material' ? 'material' : 'noflow',
+      kx: clamp(typeof polygon.kx === 'number' ? polygon.kx : state.solver.kx, MATERIAL_K_MIN, MATERIAL_K_MAX),
+      ky: clamp(typeof polygon.ky === 'number' ? polygon.ky : state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
     });
   });
 
@@ -591,6 +608,48 @@ function wireControls(): void {
     scheduleSolve();
   });
 
+  selectedPolygonKxInput.addEventListener('change', () => {
+    const polygon = getSelectedPolygon();
+    if (!polygon) {
+      return;
+    }
+    polygon.kx = readNumber(selectedPolygonKxInput, polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    selectedPolygonKxInput.value = String(polygon.kx);
+    updateSelectionPanel();
+    if (polygon.regionType === 'material') {
+      scheduleSolve();
+    } else {
+      render();
+    }
+  });
+
+  selectedPolygonKyInput.addEventListener('change', () => {
+    const polygon = getSelectedPolygon();
+    if (!polygon) {
+      return;
+    }
+    polygon.ky = readNumber(selectedPolygonKyInput, polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    selectedPolygonKyInput.value = String(polygon.ky);
+    updateSelectionPanel();
+    if (polygon.regionType === 'material') {
+      scheduleSolve();
+    } else {
+      render();
+    }
+  });
+
+  selectedPolygonMaterialToggleBtn.addEventListener('click', () => {
+    const polygon = getSelectedPolygon();
+    if (!polygon) {
+      return;
+    }
+    polygon.kx = readNumber(selectedPolygonKxInput, polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    polygon.ky = readNumber(selectedPolygonKyInput, polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    polygon.regionType = polygon.regionType === 'material' ? 'noflow' : 'material';
+    updateSelectionPanel();
+    scheduleSolve();
+  });
+
   toolButtons.forEach((button) => {
     const tool = button.dataset.tool as Tool | undefined;
     if (tool) {
@@ -650,6 +709,24 @@ function wireControls(): void {
   canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('contextmenu', (event) => {
     event.preventDefault();
+    if (state.tool !== 'select') {
+      return;
+    }
+    const view = getCanvasView();
+    const screenPoint = eventToCanvasPoint(event);
+    if (!pointInViewport(screenPoint, view.viewport)) {
+      return;
+    }
+    const worldPoint = clampPoint(screenToWorld(screenPoint, view));
+    const polygon = findPolygon(worldPoint);
+    if (!polygon) {
+      return;
+    }
+    state.selected = { kind: 'polygon', id: polygon.id };
+    updateSelectionPanel();
+    render();
+    selectedPolygonKxInput.focus();
+    selectedPolygonKxInput.select();
   });
   canvas.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('dragenter', onWindowDragEnter);
@@ -977,6 +1054,11 @@ function onPointerDown(event: PointerEvent): void {
   state.hoverPoint = point;
   state.lastPointerType = event.pointerType || 'mouse';
 
+  if (event.button === 2) {
+    updateCanvasCursor(point);
+    return;
+  }
+
   canvas.setPointerCapture(event.pointerId);
 
   if (state.tool === 'select') {
@@ -1290,6 +1372,9 @@ function createPolygonFromDrag(start: Point, end: Point): NoFlowPolygon | null {
   return {
     id: state.nextId++,
     vertices,
+    regionType: 'noflow',
+    kx: state.solver.kx,
+    ky: state.solver.ky,
   };
 }
 
@@ -1658,7 +1743,7 @@ function pointerWorldThreshold(): number {
   return basePixels * Math.max(worldPerPxX, worldPerPxY);
 }
 
-function eventToCanvasPoint(event: PointerEvent | WheelEvent): Point {
+function eventToCanvasPoint(event: { clientX: number; clientY: number }): Point {
   const rect = canvas.getBoundingClientRect();
   return {
     x: event.clientX - rect.left,
@@ -1744,11 +1829,11 @@ function solveAndRender(): void {
 
 function updateGuidanceUI(): void {
   const hints: Record<Tool, string> = {
-    select: 'Select and drag endpoints/lines/polygons to edit geometry and BCs.',
+    select: 'Select and drag endpoints/lines/polygons to edit geometry and BCs. Right-click a region for material settings.',
     equipotential: 'Draw a fixed-head equipotential (EP) line.',
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
     'noflow-line': 'Draw an impermeable no-flow line.',
-    'noflow-zone': 'Draw an impermeable no-flow polygon.',
+    'noflow-zone': 'Draw a region polygon (impermeable by default).',
     standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
   toolHint.textContent = hints[state.tool];
@@ -1776,8 +1861,10 @@ function updateGuidanceUI(): void {
 function updateBoundaryInventory(): void {
   const lines = [...state.lineBoundaries].reverse();
   const polygons = [...state.polygons].sort((a, b) => a.id - b.id);
+  const noFlowPolygons = polygons.filter((polygon) => polygon.regionType !== 'material');
+  const materialRegions = polygons.filter((polygon) => polygon.regionType === 'material');
 
-  inventorySummary.textContent = `${lines.length} line BCs + ${polygons.length} no-flow polygons`;
+  inventorySummary.textContent = `${lines.length} line BCs + ${noFlowPolygons.length} no-flow polygons${materialRegions.length > 0 ? ` + ${materialRegions.length} material regions` : ''}`;
   inventoryList.innerHTML = '';
 
   if (lines.length === 0 && polygons.length === 0) {
@@ -1884,7 +1971,12 @@ function updateBoundaryInventory(): void {
     if (state.selected?.kind === 'polygon' && state.selected.id === polygon.id) {
       button.classList.add('is-selected');
     }
-    button.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
+    if (polygon.regionType === 'material') {
+      const anisotropy = polygon.kx / polygon.ky;
+      button.textContent = `Material region #${polygon.id} (Kx=${polygon.kx.toFixed(2)}, Ky=${polygon.ky.toFixed(2)}, Kx/Ky=${anisotropy.toFixed(2)})`;
+    } else {
+      button.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
+    }
     button.addEventListener('click', () => {
       state.selected = { kind: 'polygon', id: polygon.id };
       updateSelectionPanel();
@@ -1954,6 +2046,7 @@ function updateLineInventoryDropIndicators(): void {
 function updateSelectionPanel(): void {
   if (!state.selected) {
     selectedHeadRow.classList.add('is-hidden');
+    selectedPolygonMaterialPanel.classList.add('is-hidden');
     deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
@@ -1964,6 +2057,7 @@ function updateSelectionPanel(): void {
     const line = state.lineBoundaries.find((item) => item.id === state.selected?.id);
     if (!line) {
       selectedHeadRow.classList.add('is-hidden');
+      selectedPolygonMaterialPanel.classList.add('is-hidden');
       deleteBtn.classList.add('is-hidden');
       updateBoundaryInventory();
       updateGuidanceUI();
@@ -1975,6 +2069,7 @@ function updateSelectionPanel(): void {
     } else {
       selectedHeadRow.classList.add('is-hidden');
     }
+    selectedPolygonMaterialPanel.classList.add('is-hidden');
     deleteBtn.classList.remove('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
@@ -1984,15 +2079,38 @@ function updateSelectionPanel(): void {
   const polygon = state.polygons.find((item) => item.id === state.selected?.id);
   if (!polygon) {
     selectedHeadRow.classList.add('is-hidden');
+    selectedPolygonMaterialPanel.classList.add('is-hidden');
     deleteBtn.classList.add('is-hidden');
     updateBoundaryInventory();
     updateGuidanceUI();
     return;
   }
   selectedHeadRow.classList.add('is-hidden');
+  selectedPolygonMaterialPanel.classList.remove('is-hidden');
+  selectedPolygonKxInput.value = String(polygon.kx);
+  selectedPolygonKyInput.value = String(polygon.ky);
+  selectedPolygonMaterialToggleBtn.textContent =
+    polygon.regionType === 'material' ? 'Set as impermeable' : 'Convert to material';
+  if (polygon.regionType === 'material') {
+    selectedPolygonMaterialText.textContent = `Material region active. Geometric mean K = ${Math.sqrt(
+      polygon.kx * polygon.ky,
+    ).toFixed(2)}.`;
+  } else {
+    selectedPolygonMaterialText.textContent = 'Impermeable region. Convert to material to assign local Kx/Ky.';
+  }
+  selectedPolygonSwatch.style.background = polygon.regionType === 'material'
+    ? materialRegionColor(polygon.kx, polygon.ky)
+    : RENDER_STYLE.noFlowColor;
   deleteBtn.classList.remove('is-hidden');
   updateBoundaryInventory();
   updateGuidanceUI();
+}
+
+function getSelectedPolygon(): NoFlowPolygon | null {
+  if (state.selected?.kind !== 'polygon') {
+    return null;
+  }
+  return state.polygons.find((item) => item.id === state.selected?.id) ?? null;
 }
 
 function updateStandpipeReading(): void {
@@ -2036,16 +2154,37 @@ function solveGroundwater(
 
   const noFlowLines = lineBoundaries.filter((line) => line.kind === 'noflow');
   const fixedLines = lineBoundaries.filter((line) => line.kind === 'equipotential' || line.kind === 'phreatic');
+  const noFlowPolygons = polygons.filter((polygon) => polygon.regionType !== 'material');
+  const materialPolygons = polygons.filter((polygon) => polygon.regionType === 'material');
 
   const bandThickness = 0.5 * Math.min(dx, dy);
   const noFlowPaddingCells = 1;
   const noFlowMask = Array.from({ length: ny }, () => Array.from({ length: nx }, () => false));
+  const cellKx = Array.from({ length: ny }, () => Array.from({ length: nx }, () => kx));
+  const cellKy = Array.from({ length: ny }, () => Array.from({ length: nx }, () => ky));
 
   noFlowLines.forEach((line) => {
     const nodes = rasterizeBoundaryLineNodes(line, domain, solver, noFlowPaddingCells);
     nodes.forEach(({ i, j }) => {
       noFlowMask[j][i] = true;
     });
+  });
+
+  materialPolygons.forEach((polygon) => {
+    const localKx = clamp(polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    const localKy = clamp(polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        const point = { x: i * dx, y: j * dy };
+        if (
+          pointInPolygon(point, polygon.vertices) ||
+          distancePointToPolygonEdges(point, polygon.vertices) <= bandThickness
+        ) {
+          cellKx[j][i] = localKx;
+          cellKy[j][i] = localKy;
+        }
+      }
+    }
   });
 
   for (let j = 0; j < ny; j += 1) {
@@ -2056,7 +2195,7 @@ function solveGroundwater(
         continue;
       }
       if (
-        polygons.some((polygon) =>
+        noFlowPolygons.some((polygon) =>
           pointInPolygon(point, polygon.vertices) ||
           distancePointToPolygonEdges(point, polygon.vertices) <= bandThickness,
         )
@@ -2122,9 +2261,6 @@ function solveGroundwater(
     }
   }
 
-  const aX = kx / (dx * dx);
-  const aY = ky / (dy * dy);
-
   let converged = false;
   let residual = Number.POSITIVE_INFINITY;
   let iterations = 0;
@@ -2140,6 +2276,8 @@ function solveGroundwater(
 
         let coeff = 0;
         let rhs = 0;
+        const aX = cellKx[j][i] / (dx * dx);
+        const aY = cellKy[j][i] / (dy * dy);
 
         if (i + 1 < nx && active[j][i + 1]) {
           coeff += aX;
@@ -2200,8 +2338,8 @@ function solveGroundwater(
 
       const gradX = nodeDerivativeX(heads, active, i, j, dx);
       const gradY = nodeDerivativeY(heads, active, i, j, dy);
-      qx[j][i] = -kx * gradX;
-      qy[j][i] = -ky * gradY;
+      qx[j][i] = -cellKx[j][i] * gradX;
+      qy[j][i] = -cellKy[j][i] * gradY;
     }
   }
 
@@ -3108,18 +3246,83 @@ function drawNoFlowPolygons(view: CanvasView): void {
       return;
     }
     const screenVertices = polygon.vertices.map((vertex) => worldToScreen(vertex, view));
-    ctx.beginPath();
-    ctx.moveTo(screenVertices[0].x, screenVertices[0].y);
-    for (let idx = 1; idx < screenVertices.length; idx += 1) {
-      ctx.lineTo(screenVertices[idx].x, screenVertices[idx].y);
+    tracePolygonPath(screenVertices);
+    if (polygon.regionType === 'material') {
+      ctx.fillStyle = materialRegionColor(polygon.kx, polygon.ky);
+      ctx.fill();
+      drawMaterialAnisotropyHatch(screenVertices, polygon.kx, polygon.ky);
+      ctx.strokeStyle = 'rgba(30, 45, 60, 0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      return;
     }
-    ctx.closePath();
     ctx.fillStyle = RENDER_STYLE.noFlowColor;
     ctx.fill();
     ctx.strokeStyle = RENDER_STYLE.noFlowColor;
     ctx.lineWidth = 1.2;
     ctx.stroke();
   });
+}
+
+function tracePolygonPath(vertices: Point[]): void {
+  if (vertices.length < 3) {
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(vertices[0].x, vertices[0].y);
+  for (let idx = 1; idx < vertices.length; idx += 1) {
+    ctx.lineTo(vertices[idx].x, vertices[idx].y);
+  }
+  ctx.closePath();
+}
+
+function materialRegionColor(kx: number, ky: number): string {
+  const geometricMean = Math.sqrt(clamp(kx, MATERIAL_K_MIN, MATERIAL_K_MAX) * clamp(ky, MATERIAL_K_MIN, MATERIAL_K_MAX));
+  const logMin = Math.log10(MATERIAL_K_MIN);
+  const logMax = Math.log10(MATERIAL_K_MAX);
+  const t = clamp((Math.log10(geometricMean) - logMin) / Math.max(logMax - logMin, 1e-9), 0, 1);
+  const hue = 215 - 170 * t;
+  const saturation = 72 - 14 * t;
+  const lightness = 80 - 34 * t;
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
+function drawMaterialAnisotropyHatch(vertices: Point[], kx: number, ky: number): void {
+  const anisotropy = Math.max(kx, ky) / Math.max(Math.min(kx, ky), 1e-9);
+  if (anisotropy < 1.05) {
+    return;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  vertices.forEach((vertex) => {
+    minX = Math.min(minX, vertex.x);
+    maxX = Math.max(maxX, vertex.x);
+    minY = Math.min(minY, vertex.y);
+    maxY = Math.max(maxY, vertex.y);
+  });
+  const span = Math.hypot(maxX - minX, maxY - minY);
+  const spacing = clamp(16 - 1.8 * Math.log(anisotropy), 8, 16);
+  const direction = kx >= ky ? 1 : -1;
+
+  ctx.save();
+  tracePolygonPath(vertices);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(25, 40, 55, 0.32)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  for (let offset = -span; offset <= span * 2; offset += spacing) {
+    const x0 = minX + offset;
+    const y0 = direction > 0 ? maxY : minY;
+    const x1 = x0 + direction * span;
+    const y1 = direction > 0 ? minY : maxY;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function placeLabelNearAnchor(
@@ -3586,6 +3789,9 @@ function exportStateJson(): void {
     polygons: state.polygons.map((polygon) => ({
       id: polygon.id,
       vertices: polygon.vertices.map((vertex) => ({ ...vertex })),
+      regionType: polygon.regionType,
+      kx: polygon.kx,
+      ky: polygon.ky,
     })),
     standpipePoint: state.standpipePoint ? { ...state.standpipePoint } : null,
   };
@@ -3652,7 +3858,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
 
   const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
   const lines = readPersistedLines(root.lines);
-  const polygons = readPolygons(root.polygons);
+  const polygons = readPolygons(root.polygons, solver);
   const standpipePoint = readOptionalPoint(root.standpipePoint, 'standpipePoint');
 
   return {
@@ -3692,6 +3898,9 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.polygons = imported.polygons.map((polygon) => ({
     id: polygon.id,
     vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
+    regionType: polygon.regionType === 'material' ? 'material' : 'noflow',
+    kx: clamp(polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX),
+    ky: clamp(polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
   }));
 
   const maxBoundaryId = state.lineBoundaries.reduce((maxId, line) => Math.max(maxId, line.id), 0);
@@ -3752,7 +3961,7 @@ function readPersistedLines(value: unknown): LineBoundary[] {
   });
 }
 
-function readPolygons(value: unknown): NoFlowPolygon[] {
+function readPolygons(value: unknown, solver?: SolverSettings): NoFlowPolygon[] {
   if (!Array.isArray(value)) {
     throw new Error('polygons must be an array.');
   }
@@ -3765,7 +3974,12 @@ function readPolygons(value: unknown): NoFlowPolygon[] {
     const vertices = record.vertices.map((vertex, vertexIndex) =>
       readPoint(vertex, `polygons[${index}].vertices[${vertexIndex}]`),
     );
-    return { id, vertices };
+    const regionType = record.regionType === 'material' ? 'material' : 'noflow';
+    const fallbackKx = solver?.kx ?? 1;
+    const fallbackKy = solver?.ky ?? 1;
+    const kx = readOptionalNumberValue(record.kx, MATERIAL_K_MIN, MATERIAL_K_MAX, fallbackKx, `polygons[${index}].kx`);
+    const ky = readOptionalNumberValue(record.ky, MATERIAL_K_MIN, MATERIAL_K_MAX, fallbackKy, `polygons[${index}].ky`);
+    return { id, vertices, regionType, kx, ky };
   });
 }
 
@@ -3803,6 +4017,19 @@ function readOptionalBoolean(value: unknown, fallback: boolean, label: string): 
     return fallback;
   }
   return readBoolean(value, label);
+}
+
+function readOptionalNumberValue(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+  label: string,
+): number {
+  if (typeof value === 'undefined') {
+    return clamp(fallback, min, max);
+  }
+  return readNumberValue(value, label, min, max);
 }
 
 function readInteger(value: unknown, label: string, min: number, max: number): number {

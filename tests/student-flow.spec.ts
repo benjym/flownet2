@@ -625,6 +625,61 @@ test.describe('Flow Net Studio student workflow', () => {
     expect(transformedReadout.x).toBeLessThan(realReadout.x - 0.5);
   });
 
+  test('polygon can be converted to a material region with right-click editing', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+
+    const start = point(0.42, 0.53);
+    const end = point(0.58, 0.68);
+    const center = point(0.5, 0.61);
+
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y);
+    await page.mouse.up();
+
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.mouse.click(center.x, center.y, { button: 'right' });
+
+    await expect(page.locator('#selectedPolygonMaterialPanel')).not.toHaveClass(/is-hidden/);
+    await expect(page.locator('#selectedPolygonMaterialToggleBtn')).toContainText('Convert to material');
+
+    const selectedKx = page.locator('#selectedPolygonKx');
+    const selectedKy = page.locator('#selectedPolygonKy');
+    await selectedKx.fill('9');
+    await selectedKx.dispatchEvent('change');
+    await selectedKy.fill('1');
+    await selectedKy.dispatchEvent('change');
+    await page.locator('#selectedPolygonMaterialToggleBtn').click();
+
+    await expect(page.locator('#inventorySummary')).toContainText('1 material regions');
+    await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
+
+    const saveDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const saveDownload = await saveDownloadPromise;
+    const savePath = await saveDownload.path();
+    expect(savePath).not.toBeNull();
+    if (!savePath) {
+      throw new Error('Save-state download path was null');
+    }
+    const savedState = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+    expect(savedState.polygons[0].regionType).toBe('material');
+    expect(savedState.polygons[0].kx).toBe(9);
+    expect(savedState.polygons[0].ky).toBe(1);
+  });
+
   test('student can load a saved state JSON file', async ({ page }) => {
     await page.goto('/');
 
