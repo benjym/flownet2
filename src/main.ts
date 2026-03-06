@@ -1,4 +1,4 @@
-type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'standpipe';
+type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'material-zone' | 'standpipe';
 type LineKind = 'equipotential' | 'phreatic' | 'noflow';
 type CoordinateMode = 'real' | 'transformed';
 
@@ -216,6 +216,9 @@ const selectedHeadInput = byId<HTMLInputElement>('selectedHead');
 const toolHint = byId<HTMLParagraphElement>('toolHint');
 const toolStep = byId<HTMLParagraphElement>('toolStep');
 const newHeadWrap = byId<HTMLLabelElement>('newHeadWrap');
+const newMaterialWrap = byId<HTMLDivElement>('newMaterialWrap');
+const newMaterialKxInput = byId<HTMLInputElement>('newMaterialKx');
+const newMaterialKyInput = byId<HTMLInputElement>('newMaterialKy');
 const solveBtn = byId<HTMLButtonElement>('solveBtn');
 const exportBtn = byId<HTMLButtonElement>('exportBtn');
 const saveStateBtn = byId<HTMLButtonElement>('saveStateBtn');
@@ -247,6 +250,7 @@ const TOOL_SHORTCUT_INFO: Record<Tool, { label: string; aria: string }> = {
   phreatic: { label: 'P', aria: 'P' },
   'noflow-line': { label: 'F', aria: 'F' },
   'noflow-zone': { label: 'I', aria: 'I' },
+  'material-zone': { label: 'M', aria: 'M' },
   standpipe: { label: 'S', aria: 'S' },
 };
 
@@ -929,6 +933,9 @@ function toolFromShortcut(event: KeyboardEvent): Tool | null {
   if (key === 'i') {
     return 'noflow-zone';
   }
+  if (key === 'm') {
+    return 'material-zone';
+  }
   if (key === 's') {
     return 'standpipe';
   }
@@ -1088,7 +1095,7 @@ function onPointerDown(event: PointerEvent): void {
     return;
   }
 
-  if (state.tool === 'noflow-zone') {
+  if (state.tool === 'noflow-zone' || state.tool === 'material-zone') {
     state.drag = { type: 'polygon-draw', start: point, current: point };
     updateGuidanceUI();
     render();
@@ -1125,6 +1132,7 @@ function onPointerDown(event: PointerEvent): void {
       phreatic: 'phreatic',
       'noflow-line': 'noflow',
       'noflow-zone': null,
+      'material-zone': null,
     };
 
     const mapped = kindMap[state.tool];
@@ -1294,7 +1302,18 @@ function onPointerUp(event: PointerEvent): void {
   state.hoverPoint = point;
 
   if (point && state.drag.type === 'polygon-draw') {
-    const polygon = createPolygonFromDrag(state.drag.start, state.drag.current);
+    const isMaterialZone = state.tool === 'material-zone';
+    const materialKx = readNumber(newMaterialKxInput, state.solver.kx, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    const materialKy = readNumber(newMaterialKyInput, state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX);
+    newMaterialKxInput.value = String(materialKx);
+    newMaterialKyInput.value = String(materialKy);
+    const polygon = createPolygonFromDrag(
+      state.drag.start,
+      state.drag.current,
+      isMaterialZone ? 'material' : 'noflow',
+      materialKx,
+      materialKy,
+    );
     if (polygon) {
       state.polygons.push(polygon);
       state.selected = { kind: 'polygon', id: polygon.id };
@@ -1374,7 +1393,13 @@ function dragEventHasFiles(event: DragEvent): boolean {
   return Array.from(types).includes('Files');
 }
 
-function createPolygonFromDrag(start: Point, end: Point): NoFlowPolygon | null {
+function createPolygonFromDrag(
+  start: Point,
+  end: Point,
+  regionType: NoFlowPolygon['regionType'],
+  kx: number,
+  ky: number,
+): NoFlowPolygon | null {
   const vertices = rectangleVerticesFromDrag(start, end);
   if (!vertices) {
     return null;
@@ -1382,9 +1407,9 @@ function createPolygonFromDrag(start: Point, end: Point): NoFlowPolygon | null {
   return {
     id: state.nextId++,
     vertices,
-    regionType: 'noflow',
-    kx: state.solver.kx,
-    ky: state.solver.ky,
+    regionType,
+    kx,
+    ky,
   };
 }
 
@@ -1844,10 +1869,12 @@ function updateGuidanceUI(): void {
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
     'noflow-line': 'Draw an impermeable no-flow line.',
     'noflow-zone': 'Draw a region polygon (impermeable by default).',
+    'material-zone': 'Draw a material region polygon and set Kx/Ky before placement.',
     standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
   toolHint.textContent = hints[state.tool];
   newHeadWrap.classList.toggle('is-hidden', state.tool !== 'equipotential');
+  newMaterialWrap.classList.toggle('is-hidden', state.tool !== 'material-zone');
 
   let stepText = '';
   if (state.tool === 'select') {
@@ -1857,7 +1884,7 @@ function updateGuidanceUI(): void {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
       : 'Step 1 of 2: click first endpoint for a new line.';
-  } else if (state.tool === 'noflow-zone') {
+  } else if (state.tool === 'noflow-zone' || state.tool === 'material-zone') {
     stepText = state.drag.type === 'polygon-draw'
       ? 'Step 2 of 2: drag and release to set initial polygon size. Press Esc to cancel.'
       : 'Step 1 of 2: click and drag to create an initial polygon.';
