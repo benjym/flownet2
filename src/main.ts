@@ -1,4 +1,4 @@
-type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'material-zone' | 'standpipe';
+type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'soil' | 'standpipe';
 type LineKind = 'equipotential' | 'phreatic' | 'noflow';
 type CoordinateMode = 'real' | 'transformed';
 
@@ -110,10 +110,13 @@ interface PersistedFlowNetStateV1 {
   newHead: number;
   lines: LineBoundary[];
   polygons: NoFlowPolygon[];
+  boundaryOrder?: Array<{ kind: 'line' | 'polygon'; id: number }>;
   standpipePoint: Point | null;
 }
 
 type Selected = { kind: 'line'; id: number } | { kind: 'polygon'; id: number } | null;
+type BoundaryRef = Exclude<Selected, null>;
+type BoundaryVertexHit = BoundaryRef & { vertexIndex: number };
 
 type DragState =
   | { type: 'none' }
@@ -157,7 +160,7 @@ interface RenderStyleTokens {
 type LineInventoryDropPosition = 'before' | 'after';
 
 interface LineInventoryDropTarget {
-  targetId: number;
+  target: BoundaryRef;
   position: LineInventoryDropPosition;
 }
 
@@ -226,7 +229,6 @@ const saveStateBtn = byId<HTMLButtonElement>('saveStateBtn');
 const loadStateInput = byId<HTMLInputElement>('loadStateInput');
 const deleteBtn = byId<HTMLButtonElement>('deleteBtn');
 const toolRow = byId<HTMLDivElement>('toolRow');
-const inventorySummary = byId<HTMLParagraphElement>('inventorySummary');
 const inventoryList = byId<HTMLDivElement>('inventoryList');
 const selectedPolygonMaterialPanel = byId<HTMLDivElement>('selectedPolygonMaterialPanel');
 const selectedPolygonKxInput = byId<HTMLInputElement>('selectedPolygonKx');
@@ -250,7 +252,7 @@ const TOOL_SHORTCUT_INFO: Record<Tool, { label: string; aria: string }> = {
   phreatic: { label: 'P', aria: 'P' },
   'noflow-line': { label: 'F', aria: 'F' },
   'noflow-zone': { label: 'I', aria: 'I' },
-  'material-zone': { label: 'M', aria: 'M' },
+  'soil': { label: 'M', aria: 'M' },
   standpipe: { label: 'S', aria: 'S' },
 };
 
@@ -299,30 +301,34 @@ const state = {
     ctrl: false,
     meta: false,
   },
+  boundaryOrder: [] as BoundaryRef[],
   solution: null as Solution | null,
 };
 
 let solveTimer: number | null = null;
 let fileDragDepth = 0;
 let guideReturnFocus: HTMLElement | null = null;
-let draggingLineInventoryId: number | null = null;
+let draggingInventoryItem: BoundaryRef | null = null;
 let lineInventoryDropTarget: LineInventoryDropTarget | null = null;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
 const MATERIAL_K_MIN = 0.01;
 const MATERIAL_K_MAX = 1000;
-const MATERIAL_COLOR_HUE_START = 215;
-const MATERIAL_COLOR_HUE_SPAN = 170;
-const MATERIAL_COLOR_SAT_START = 72;
-const MATERIAL_COLOR_SAT_SPAN = 14;
-const MATERIAL_COLOR_LIGHT_START = 80;
-const MATERIAL_COLOR_LIGHT_SPAN = 34;
+const MATERIAL_COLOR_LUT = [
+  [35, 22, 12],
+  [68, 45, 27],
+  [108, 76, 50],
+  [154, 119, 84],
+  [198, 161, 123],
+  [236, 213, 180],
+] as const;
 const ANISOTROPY_HATCH_THRESHOLD = 1.05;
 const HATCH_SPACING_BASE = 16;
 const HATCH_SPACING_LOG_SCALE = 1.8;
 const HATCH_SPACING_MIN = 8;
 
+newMaterialWrap.classList.add('is-hidden');
 wireControls();
 resizeCanvas();
 updateCanvasCursor();
@@ -492,6 +498,7 @@ function loadExampleById(
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.lineBoundaries = [];
   state.polygons = [];
+  state.boundaryOrder = [];
   state.nextId = 1;
 
   preset.lines.forEach((line) => {
@@ -508,6 +515,7 @@ function loadExampleById(
       ky: clamp(typeof polygon.ky === 'number' ? polygon.ky : state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
     });
   });
+  resetBoundaryOrderToLegacyDefault();
 
   domainWidthInput.value = String(state.domain.width);
   domainHeightInput.value = String(state.domain.height);
@@ -665,18 +673,18 @@ function wireControls(): void {
   });
 
   toolButtons.forEach((button) => {
-    const tool = button.dataset.tool as Tool | undefined;
+    const tool = parseTool(button.dataset.tool);
     if (tool) {
       const shortcut = TOOL_SHORTCUT_INFO[tool];
       button.title = `${button.textContent?.trim() ?? tool} (${shortcut.label})`;
       button.setAttribute('aria-keyshortcuts', shortcut.aria);
     }
     button.addEventListener('click', () => {
-      const toolValue = button.dataset.tool;
+      const toolValue = parseTool(button.dataset.tool);
       if (!toolValue) {
         return;
       }
-      setTool(toolValue as Tool);
+      setTool(toolValue);
     });
   });
 
@@ -934,7 +942,7 @@ function toolFromShortcut(event: KeyboardEvent): Tool | null {
     return 'noflow-zone';
   }
   if (key === 'm') {
-    return 'material-zone';
+    return 'soil';
   }
   if (key === 's') {
     return 'standpipe';
@@ -974,6 +982,24 @@ function closeGuideOverlay(): void {
   guideReturnFocus = null;
 }
 
+function parseTool(value: string | undefined): Tool | null {
+  if (!value) {
+    return null;
+  }
+  if (
+    value === 'select' ||
+    value === 'equipotential' ||
+    value === 'phreatic' ||
+    value === 'noflow-line' ||
+    value === 'noflow-zone' ||
+    value === 'soil' ||
+    value === 'standpipe'
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -987,8 +1013,10 @@ function deleteSelected(): void {
   }
   if (state.selected.kind === 'line') {
     state.lineBoundaries = state.lineBoundaries.filter((line) => line.id !== state.selected?.id);
+    removeBoundaryOrderItem({ kind: 'line', id: state.selected.id });
   } else {
     state.polygons = state.polygons.filter((polygon) => polygon.id !== state.selected?.id);
+    removeBoundaryOrderItem({ kind: 'polygon', id: state.selected.id });
   }
   state.selected = null;
   updateSelectionPanel();
@@ -1015,7 +1043,7 @@ function setTool(tool: Tool): void {
   state.previewPoint = null;
   state.drag = { type: 'none' };
   toolButtons.forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.tool === tool);
+    button.classList.toggle('is-active', parseTool(button.dataset.tool) === tool);
   });
   updateGuidanceUI();
   render();
@@ -1033,6 +1061,7 @@ function addBoundaryFromVertices(kind: LineKind, vertices: Point[], head: number
     vertices: normalizedVertices,
     head,
   });
+  addBoundaryOrderItem({ kind: 'line', id: state.nextId });
   state.nextId += 1;
 }
 
@@ -1046,6 +1075,79 @@ function setLineVertices(line: LineBoundary, vertices: Point[]): void {
     return;
   }
   line.vertices = normalizedVertices;
+}
+
+function boundaryRefKey(ref: BoundaryRef): string {
+  return `${ref.kind}:${ref.id}`;
+}
+
+function boundaryRefMatches(a: BoundaryRef, b: BoundaryRef): boolean {
+  return a.kind === b.kind && a.id === b.id;
+}
+
+function syncBoundaryOrder(): void {
+  const lineIds = new Set(state.lineBoundaries.map((line) => line.id));
+  const polygonIds = new Set(state.polygons.map((polygon) => polygon.id));
+  const seen = new Set<string>();
+  const next: BoundaryRef[] = [];
+
+  state.boundaryOrder.forEach((ref) => {
+    const exists = ref.kind === 'line' ? lineIds.has(ref.id) : polygonIds.has(ref.id);
+    if (!exists) {
+      return;
+    }
+    const key = boundaryRefKey(ref);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    next.push(ref);
+  });
+
+  // Legacy default layering keeps polygons under lines unless user reorders.
+  state.polygons.forEach((polygon) => {
+    const ref: BoundaryRef = { kind: 'polygon', id: polygon.id };
+    const key = boundaryRefKey(ref);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    next.push(ref);
+  });
+
+  state.lineBoundaries.forEach((line) => {
+    const ref: BoundaryRef = { kind: 'line', id: line.id };
+    const key = boundaryRefKey(ref);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    next.push(ref);
+  });
+
+  state.boundaryOrder = next;
+}
+
+function resetBoundaryOrderToLegacyDefault(): void {
+  state.boundaryOrder = [];
+  syncBoundaryOrder();
+}
+
+function addBoundaryOrderItem(ref: BoundaryRef): void {
+  syncBoundaryOrder();
+  if (state.boundaryOrder.some((item) => boundaryRefMatches(item, ref))) {
+    return;
+  }
+  state.boundaryOrder.push({ ...ref });
+}
+
+function removeBoundaryOrderItem(ref: BoundaryRef): void {
+  state.boundaryOrder = state.boundaryOrder.filter((item) => !boundaryRefMatches(item, ref));
+}
+
+function boundaryOrderTopFirst(): BoundaryRef[] {
+  syncBoundaryOrder();
+  return [...state.boundaryOrder].reverse();
 }
 
 function normalizeLineVertices(vertices: Point[]): Point[] {
@@ -1095,7 +1197,7 @@ function onPointerDown(event: PointerEvent): void {
     return;
   }
 
-  if (state.tool === 'noflow-zone' || state.tool === 'material-zone') {
+  if (state.tool === 'noflow-zone' || state.tool === 'soil') {
     state.drag = { type: 'polygon-draw', start: point, current: point };
     updateGuidanceUI();
     render();
@@ -1132,7 +1234,7 @@ function onPointerDown(event: PointerEvent): void {
       phreatic: 'phreatic',
       'noflow-line': 'noflow',
       'noflow-zone': null,
-      'material-zone': null,
+      'soil': null,
     };
 
     const mapped = kindMap[state.tool];
@@ -1302,7 +1404,7 @@ function onPointerUp(event: PointerEvent): void {
   state.hoverPoint = point;
 
   if (point && state.drag.type === 'polygon-draw') {
-    const isMaterialZone = state.tool === 'material-zone';
+    const isMaterialZone = state.tool === 'soil';
     let materialKx = state.solver.kx;
     let materialKy = state.solver.ky;
     if (isMaterialZone) {
@@ -1320,6 +1422,7 @@ function onPointerUp(event: PointerEvent): void {
     );
     if (polygon) {
       state.polygons.push(polygon);
+      addBoundaryOrderItem({ kind: 'polygon', id: polygon.id });
       state.selected = { kind: 'polygon', id: polygon.id };
       updateSelectionPanel();
       scheduleSolve();
@@ -1504,44 +1607,40 @@ function startSelectionDrag(point: Point, screenPoint: Point, event: PointerEven
     return;
   }
 
-  const lineVertexHit = findLineVertex(point);
-  if (lineVertexHit) {
-    state.selected = { kind: 'line', id: lineVertexHit.id };
-    state.drag = { type: 'line-vertex', id: lineVertexHit.id, vertexIndex: lineVertexHit.vertexIndex };
-    updateSelectionPanel();
-    return;
-  }
-
-  const vertexHit = findPolygonVertex(point);
+  const vertexHit = findBoundaryVertex(point);
   if (vertexHit) {
-    state.selected = { kind: 'polygon', id: vertexHit.id };
-    state.drag = { type: 'polygon-vertex', id: vertexHit.id, vertexIndex: vertexHit.vertexIndex };
+    state.selected = { kind: vertexHit.kind, id: vertexHit.id };
+    state.drag = vertexHit.kind === 'line'
+      ? { type: 'line-vertex', id: vertexHit.id, vertexIndex: vertexHit.vertexIndex }
+      : { type: 'polygon-vertex', id: vertexHit.id, vertexIndex: vertexHit.vertexIndex };
     updateSelectionPanel();
     return;
   }
 
-  const lineHit = findLine(point);
-  if (lineHit) {
-    state.selected = { kind: 'line', id: lineHit.id };
-    state.drag = {
-      type: 'line-move',
-      id: lineHit.id,
-      startPointer: point,
-      startVertices: getLineVertices(lineHit).map((vertex) => ({ ...vertex })),
-    };
-    updateSelectionPanel();
-    return;
-  }
-
-  const polygonHit = findPolygon(point);
-  if (polygonHit) {
-    state.selected = { kind: 'polygon', id: polygonHit.id };
-    state.drag = {
-      type: 'polygon-move',
-      id: polygonHit.id,
-      startPointer: point,
-      startVertices: polygonHit.vertices.map((vertex) => ({ ...vertex })),
-    };
+  const boundaryHit = findBoundary(point);
+  if (boundaryHit) {
+    state.selected = { kind: boundaryHit.kind, id: boundaryHit.id };
+    if (boundaryHit.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === boundaryHit.id);
+      if (line) {
+        state.drag = {
+          type: 'line-move',
+          id: line.id,
+          startPointer: point,
+          startVertices: getLineVertices(line).map((vertex) => ({ ...vertex })),
+        };
+      }
+    } else {
+      const polygon = state.polygons.find((item) => item.id === boundaryHit.id);
+      if (polygon) {
+        state.drag = {
+          type: 'polygon-move',
+          id: polygon.id,
+          startPointer: point,
+          startVertices: polygon.vertices.map((vertex) => ({ ...vertex })),
+        };
+      }
+    }
     updateSelectionPanel();
     return;
   }
@@ -1664,8 +1763,15 @@ function findPolygonEdge(point: Point, polygonId?: number): { id: number; edgeIn
 }
 
 function findPolygon(point: Point): NoFlowPolygon | null {
-  for (let index = state.polygons.length - 1; index >= 0; index -= 1) {
-    const polygon = state.polygons[index];
+  const ordered = boundaryOrderTopFirst();
+  for (const ref of ordered) {
+    if (ref.kind !== 'polygon') {
+      continue;
+    }
+    const polygon = state.polygons.find((item) => item.id === ref.id);
+    if (!polygon) {
+      continue;
+    }
     if (pointInPolygon(point, polygon.vertices)) {
       return polygon;
     }
@@ -1673,20 +1779,58 @@ function findPolygon(point: Point): NoFlowPolygon | null {
   return null;
 }
 
-function findLine(point: Point): LineBoundary | null {
-  const threshold = pointerWorldThreshold();
-  for (let index = state.lineBoundaries.length - 1; index >= 0; index -= 1) {
-    const line = state.lineBoundaries[index];
-    const vertices = getLineVertices(line);
-    let hit = false;
-    for (let i = 0; i < vertices.length - 1; i += 1) {
-      if (distancePointToSegment(point, vertices[i], vertices[i + 1]) <= threshold) {
-        hit = true;
-        break;
+function findBoundaryVertex(point: Point): BoundaryVertexHit | null {
+  const threshold = 1.1 * pointerWorldThreshold();
+  const ordered = boundaryOrderTopFirst();
+  for (const ref of ordered) {
+    if (ref.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === ref.id);
+      if (!line) {
+        continue;
+      }
+      const vertices = getLineVertices(line);
+      for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 1) {
+        if (distance(point, vertices[vertexIndex]) <= threshold) {
+          return { kind: 'line', id: line.id, vertexIndex };
+        }
+      }
+      continue;
+    }
+
+    const polygon = state.polygons.find((item) => item.id === ref.id);
+    if (!polygon) {
+      continue;
+    }
+    for (let vertexIndex = 0; vertexIndex < polygon.vertices.length; vertexIndex += 1) {
+      if (distance(point, polygon.vertices[vertexIndex]) <= threshold) {
+        return { kind: 'polygon', id: polygon.id, vertexIndex };
       }
     }
-    if (hit) {
-      return line;
+  }
+  return null;
+}
+
+function findBoundary(point: Point): BoundaryRef | null {
+  const threshold = pointerWorldThreshold();
+  const ordered = boundaryOrderTopFirst();
+  for (const ref of ordered) {
+    if (ref.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === ref.id);
+      if (!line) {
+        continue;
+      }
+      const vertices = getLineVertices(line);
+      for (let i = 0; i < vertices.length - 1; i += 1) {
+        if (distancePointToSegment(point, vertices[i], vertices[i + 1]) <= threshold) {
+          return { kind: 'line', id: line.id };
+        }
+      }
+      continue;
+    }
+
+    const polygon = state.polygons.find((item) => item.id === ref.id);
+    if (polygon && pointInPolygon(point, polygon.vertices)) {
+      return { kind: 'polygon', id: polygon.id };
     }
   }
   return null;
@@ -1740,10 +1884,10 @@ function updateCanvasCursor(point = state.hoverPoint): void {
     ) {
       cursor = CURSOR_PLUS;
       mode = 'plus';
-    } else if (hasPoint && (findLineVertex(point) || findPolygonVertex(point))) {
+    } else if (hasPoint && findBoundaryVertex(point)) {
       cursor = 'grab';
       mode = 'handle';
-    } else if (hasPoint && (findLine(point) || findPolygon(point))) {
+    } else if (hasPoint && findBoundary(point)) {
       cursor = 'move';
       mode = 'move';
     }
@@ -1867,18 +2011,20 @@ function solveAndRender(): void {
 }
 
 function updateGuidanceUI(): void {
+  const toolKey = state.tool as string;
+  const soilToolSelected = toolKey === 'soil';
   const hints: Record<Tool, string> = {
     select: 'Select and drag endpoints/lines/polygons to edit geometry and BCs. Right-click a region for material settings.',
     equipotential: 'Draw a fixed-head equipotential (EP) line.',
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
-    'noflow-line': 'Draw an impermeable no-flow line.',
-    'noflow-zone': 'Draw a region polygon (impermeable by default).',
-    'material-zone': 'Draw a material region polygon and set Kx/Ky before placement.',
+    'noflow-line': 'Draw an impermeable line.',
+    'noflow-zone': 'Draw an impermeable region.',
+    'soil': 'Draw a material region and set Kx/Ky before placement.',
     standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
-  toolHint.textContent = hints[state.tool];
+  toolHint.textContent = hints[state.tool] ?? hints.select;
   newHeadWrap.classList.toggle('is-hidden', state.tool !== 'equipotential');
-  newMaterialWrap.classList.toggle('is-hidden', state.tool !== 'material-zone');
+  newMaterialWrap.classList.toggle('is-hidden', !soilToolSelected);
 
   let stepText = '';
   if (state.tool === 'select') {
@@ -1888,7 +2034,7 @@ function updateGuidanceUI(): void {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
       : 'Step 1 of 2: click first endpoint for a new line.';
-  } else if (state.tool === 'noflow-zone' || state.tool === 'material-zone') {
+  } else if (state.tool === 'noflow-zone' || soilToolSelected) {
     stepText = state.drag.type === 'polygon-draw'
       ? 'Step 2 of 2: drag and release to set initial polygon size. Press Esc to cancel.'
       : 'Step 1 of 2: click and drag to create an initial polygon.';
@@ -1900,18 +2046,11 @@ function updateGuidanceUI(): void {
 }
 
 function updateBoundaryInventory(): void {
-  const lines = [...state.lineBoundaries].reverse();
-  const polygons = [...state.polygons].sort((a, b) => a.id - b.id);
-  const noFlowPolygons = polygons.filter((polygon) => polygon.regionType !== 'material');
-  const materialRegions = polygons.filter((polygon) => polygon.regionType === 'material');
-
-  const materialSuffix = materialRegions.length > 0
-    ? ` + ${materialRegions.length} material ${materialRegions.length === 1 ? 'region' : 'regions'}`
-    : '';
-  inventorySummary.textContent = `${lines.length} line BCs + ${noFlowPolygons.length} no-flow polygons${materialSuffix}`;
+  syncBoundaryOrder();
+  const ordered = boundaryOrderTopFirst();
   inventoryList.innerHTML = '';
 
-  if (lines.length === 0 && polygons.length === 0) {
+  if (ordered.length === 0) {
     const emptyState = document.createElement('p');
     emptyState.className = 'inventory-empty';
     emptyState.textContent = 'No boundaries added yet.';
@@ -1919,37 +2058,55 @@ function updateBoundaryInventory(): void {
     return;
   }
 
-  lines.forEach((line) => {
+  ordered.forEach((ref) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'inventory-item';
     button.classList.add('is-draggable');
     button.draggable = true;
-    button.dataset.lineId = String(line.id);
+    button.dataset.boundaryKind = ref.kind;
+    button.dataset.boundaryId = String(ref.id);
     button.title = 'Drag to reorder z-order';
-    if (state.selected?.kind === 'line' && state.selected.id === line.id) {
+    if (state.selected?.kind === ref.kind && state.selected.id === ref.id) {
       button.classList.add('is-selected');
     }
 
-    const label = line.kind === 'equipotential'
-      ? `EP #${line.id} (h=${line.head.toFixed(2)}m)`
-      : line.kind === 'phreatic'
-        ? `Phreatic #${line.id}`
-        : `No-flow line #${line.id}`;
+    if (ref.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === ref.id);
+      if (!line) {
+        return;
+      }
+      button.textContent = line.kind === 'equipotential'
+        ? `EP #${line.id} (h=${line.head.toFixed(2)}m)`
+        : line.kind === 'phreatic'
+          ? `Phreatic #${line.id}`
+          : `Impermeable line #${line.id}`;
+    } else {
+      const polygon = state.polygons.find((item) => item.id === ref.id);
+      if (!polygon) {
+        return;
+      }
+      if (polygon.regionType === 'material') {
+        const anisotropy = polygon.kx / Math.max(polygon.ky, 1e-9);
+        button.textContent =
+          `Material region #${polygon.id} (Kx=${polygon.kx.toFixed(2)}, Ky=${polygon.ky.toFixed(2)}, Kx/Ky=${anisotropy.toFixed(2)})`;
+      } else {
+        button.textContent = `Impermeable polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
+      }
+    }
 
-    button.textContent = label;
     button.addEventListener('dragstart', (event) => {
-      draggingLineInventoryId = line.id;
+      draggingInventoryItem = { kind: ref.kind, id: ref.id };
       lineInventoryDropTarget = null;
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', String(line.id));
+        event.dataTransfer.setData('text/plain', `${ref.kind}:${ref.id}`);
       }
       button.classList.add('is-dragging');
       updateLineInventoryDropIndicators();
     });
     button.addEventListener('dragover', (event) => {
-      if (draggingLineInventoryId === null || draggingLineInventoryId === line.id) {
+      if (!draggingInventoryItem || boundaryRefMatches(draggingInventoryItem, ref)) {
         return;
       }
       event.preventDefault();
@@ -1958,10 +2115,10 @@ function updateBoundaryInventory(): void {
         event.clientY < rect.top + rect.height * 0.5 ? 'before' : 'after';
       if (
         !lineInventoryDropTarget ||
-        lineInventoryDropTarget.targetId !== line.id ||
+        !boundaryRefMatches(lineInventoryDropTarget.target, ref) ||
         lineInventoryDropTarget.position !== position
       ) {
-        lineInventoryDropTarget = { targetId: line.id, position };
+        lineInventoryDropTarget = { target: { kind: ref.kind, id: ref.id }, position };
         updateLineInventoryDropIndicators();
       }
     });
@@ -1972,21 +2129,21 @@ function updateBoundaryInventory(): void {
       ) {
         return;
       }
-      if (lineInventoryDropTarget?.targetId === line.id) {
+      if (lineInventoryDropTarget && boundaryRefMatches(lineInventoryDropTarget.target, ref)) {
         lineInventoryDropTarget = null;
         updateLineInventoryDropIndicators();
       }
     });
     button.addEventListener('drop', (event) => {
-      if (draggingLineInventoryId === null || draggingLineInventoryId === line.id) {
+      if (!draggingInventoryItem || boundaryRefMatches(draggingInventoryItem, ref)) {
         return;
       }
       event.preventDefault();
       const rect = button.getBoundingClientRect();
       const position: LineInventoryDropPosition =
         event.clientY < rect.top + rect.height * 0.5 ? 'before' : 'after';
-      const changed = reorderLineBoundaryZOrder(draggingLineInventoryId, line.id, position);
-      draggingLineInventoryId = null;
+      const changed = reorderBoundaryZOrder(draggingInventoryItem, ref, position);
+      draggingInventoryItem = null;
       lineInventoryDropTarget = null;
       if (changed) {
         updateSelectionPanel();
@@ -1996,33 +2153,12 @@ function updateBoundaryInventory(): void {
       }
     });
     button.addEventListener('dragend', () => {
-      draggingLineInventoryId = null;
+      draggingInventoryItem = null;
       lineInventoryDropTarget = null;
       updateLineInventoryDropIndicators();
     });
     button.addEventListener('click', () => {
-      state.selected = { kind: 'line', id: line.id };
-      updateSelectionPanel();
-      render();
-    });
-    inventoryList.appendChild(button);
-  });
-
-  polygons.forEach((polygon) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'inventory-item';
-    if (state.selected?.kind === 'polygon' && state.selected.id === polygon.id) {
-      button.classList.add('is-selected');
-    }
-    if (polygon.regionType === 'material') {
-      const anisotropy = polygon.kx / Math.max(polygon.ky, 1e-9);
-      button.textContent = `Material region #${polygon.id} (Kx=${polygon.kx.toFixed(2)}, Ky=${polygon.ky.toFixed(2)}, Kx/Ky=${anisotropy.toFixed(2)})`;
-    } else {
-      button.textContent = `No-flow polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
-    }
-    button.addEventListener('click', () => {
-      state.selected = { kind: 'polygon', id: polygon.id };
+      state.selected = { kind: ref.kind, id: ref.id };
       updateSelectionPanel();
       render();
     });
@@ -2032,24 +2168,24 @@ function updateBoundaryInventory(): void {
   updateLineInventoryDropIndicators();
 }
 
-function reorderLineBoundaryZOrder(
-  draggedLineId: number,
-  targetLineId: number,
+function reorderBoundaryZOrder(
+  draggedRef: BoundaryRef,
+  targetRef: BoundaryRef,
   position: LineInventoryDropPosition,
 ): boolean {
-  if (draggedLineId === targetLineId) {
+  if (boundaryRefMatches(draggedRef, targetRef)) {
     return false;
   }
 
-  const listOrderTopFirst = [...state.lineBoundaries].reverse();
-  const dragIndex = listOrderTopFirst.findIndex((line) => line.id === draggedLineId);
-  const targetIndex = listOrderTopFirst.findIndex((line) => line.id === targetLineId);
+  const listOrderTopFirst = boundaryOrderTopFirst();
+  const dragIndex = listOrderTopFirst.findIndex((item) => boundaryRefMatches(item, draggedRef));
+  const targetIndex = listOrderTopFirst.findIndex((item) => boundaryRefMatches(item, targetRef));
   if (dragIndex < 0 || targetIndex < 0) {
     return false;
   }
 
   const [dragged] = listOrderTopFirst.splice(dragIndex, 1);
-  const updatedTargetIndex = listOrderTopFirst.findIndex((line) => line.id === targetLineId);
+  const updatedTargetIndex = listOrderTopFirst.findIndex((item) => boundaryRefMatches(item, targetRef));
   if (updatedTargetIndex < 0) {
     return false;
   }
@@ -2057,20 +2193,29 @@ function reorderLineBoundaryZOrder(
   listOrderTopFirst.splice(insertIndex, 0, dragged);
 
   const nextBottomFirst = [...listOrderTopFirst].reverse();
-  const sameOrder = nextBottomFirst.every((line, index) => line.id === state.lineBoundaries[index]?.id);
+  const sameOrder =
+    nextBottomFirst.length === state.boundaryOrder.length &&
+    nextBottomFirst.every((item, index) => boundaryRefMatches(item, state.boundaryOrder[index]));
   if (sameOrder) {
     return false;
   }
-  state.lineBoundaries = nextBottomFirst;
+  state.boundaryOrder = nextBottomFirst;
   return true;
 }
 
 function updateLineInventoryDropIndicators(): void {
-  const items = inventoryList.querySelectorAll<HTMLButtonElement>('.inventory-item[data-line-id]');
+  const items = inventoryList.querySelectorAll<HTMLButtonElement>('.inventory-item[data-boundary-kind][data-boundary-id]');
   items.forEach((item) => {
     item.classList.remove('drop-before', 'drop-after', 'is-dragging');
-    const lineId = Number(item.dataset.lineId);
-    if (Number.isFinite(lineId) && draggingLineInventoryId !== null && lineId === draggingLineInventoryId) {
+    const id = Number(item.dataset.boundaryId);
+    const kind = item.dataset.boundaryKind;
+    if (
+      Number.isFinite(id) &&
+      (kind === 'line' || kind === 'polygon') &&
+      draggingInventoryItem &&
+      draggingInventoryItem.kind === kind &&
+      draggingInventoryItem.id === id
+    ) {
       item.classList.add('is-dragging');
     }
   });
@@ -2079,7 +2224,8 @@ function updateLineInventoryDropIndicators(): void {
     return;
   }
 
-  const selector = `.inventory-item[data-line-id="${lineInventoryDropTarget.targetId}"]`;
+  const selector =
+    `.inventory-item[data-boundary-kind="${lineInventoryDropTarget.target.kind}"][data-boundary-id="${lineInventoryDropTarget.target.id}"]`;
   const target = inventoryList.querySelector<HTMLButtonElement>(selector);
   if (!target) {
     return;
@@ -2167,7 +2313,7 @@ function updateStandpipeReading(): void {
   const head = interpolateScalar(state.solution.heads, state.solution.active, state.domain, state.solver, state.standpipePoint);
   if (head === null) {
     state.standpipeReading = null;
-    standpipeText.textContent = 'Standpipe is in an impermeable/no-flow region. Move it into active soil.';
+    standpipeText.textContent = 'Standpipe is in an impermeable region. Move it into active soil.';
     return;
   }
 
@@ -2320,27 +2466,28 @@ function solveGroundwater(
 
         let coeff = 0;
         let rhs = 0;
-        const aX = cellKx[j][i] / (dx * dx);
-        const aY = cellKy[j][i] / (dy * dy);
-
         if (i + 1 < nx && active[j][i + 1]) {
-          coeff += aX;
-          rhs += aX * heads[j][i + 1];
+          const aEast = interfaceConductance(cellKx[j][i], cellKx[j][i + 1], dx);
+          coeff += aEast;
+          rhs += aEast * heads[j][i + 1];
         }
 
         if (i - 1 >= 0 && active[j][i - 1]) {
-          coeff += aX;
-          rhs += aX * heads[j][i - 1];
+          const aWest = interfaceConductance(cellKx[j][i], cellKx[j][i - 1], dx);
+          coeff += aWest;
+          rhs += aWest * heads[j][i - 1];
         }
 
         if (j + 1 < ny && active[j + 1][i]) {
-          coeff += aY;
-          rhs += aY * heads[j + 1][i];
+          const aNorth = interfaceConductance(cellKy[j][i], cellKy[j + 1][i], dy);
+          coeff += aNorth;
+          rhs += aNorth * heads[j + 1][i];
         }
 
         if (j - 1 >= 0 && active[j - 1][i]) {
-          coeff += aY;
-          rhs += aY * heads[j - 1][i];
+          const aSouth = interfaceConductance(cellKy[j][i], cellKy[j - 1][i], dy);
+          coeff += aSouth;
+          rhs += aSouth * heads[j - 1][i];
         }
 
         if (coeff <= 0) {
@@ -2415,6 +2562,13 @@ function solveGroundwater(
     streamPaths,
     anchoredNode,
   };
+}
+
+function interfaceConductance(kA: number, kB: number, spacing: number): number {
+  const safeKA = Math.max(1e-12, kA);
+  const safeKB = Math.max(1e-12, kB);
+  const harmonicMean = (2 * safeKA * safeKB) / (safeKA + safeKB);
+  return harmonicMean / (spacing * spacing);
 }
 
 function nodeDerivativeX(heads: number[][], active: boolean[][], i: number, j: number, dx: number): number {
@@ -3162,12 +3316,12 @@ function render(): void {
     if (state.view.showHeadMap) {
       drawHeadShading(view, state.solution);
     }
+  }
+  drawBoundaryStack(view);
+  if (state.solution) {
     drawContourSegments(view, state.solution);
     drawStreamPaths(view, state.solution.streamPaths);
   }
-
-  drawNoFlowPolygons(view);
-  drawBoundaries(view);
   drawPendingShape(view);
   drawStandpipe(view);
   drawSelection(view);
@@ -3284,28 +3438,43 @@ function drawStreamPaths(view: CanvasView, lines: Point[][]): void {
   });
 }
 
-function drawNoFlowPolygons(view: CanvasView): void {
-  state.polygons.forEach((polygon) => {
-    if (polygon.vertices.length < 3) {
+function drawBoundaryStack(view: CanvasView): void {
+  syncBoundaryOrder();
+  state.boundaryOrder.forEach((ref) => {
+    if (ref.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === ref.id);
+      if (line) {
+        drawLineBoundary(view, line);
+      }
       return;
     }
-    const screenVertices = polygon.vertices.map((vertex) => worldToScreen(vertex, view));
-    tracePolygonPath(screenVertices);
-    if (polygon.regionType === 'material') {
-      ctx.fillStyle = materialRegionColor(polygon.kx, polygon.ky);
-      ctx.fill();
-      drawMaterialAnisotropyHatch(screenVertices, polygon.kx, polygon.ky);
-      ctx.strokeStyle = 'rgba(30, 45, 60, 0.55)';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-      return;
+    const polygon = state.polygons.find((item) => item.id === ref.id);
+    if (polygon) {
+      drawPolygonBoundary(view, polygon);
     }
-    ctx.fillStyle = RENDER_STYLE.noFlowColor;
+  });
+}
+
+function drawPolygonBoundary(view: CanvasView, polygon: NoFlowPolygon): void {
+  if (polygon.vertices.length < 3) {
+    return;
+  }
+  const screenVertices = polygon.vertices.map((vertex) => worldToScreen(vertex, view));
+  tracePolygonPath(screenVertices);
+  if (polygon.regionType === 'material') {
+    ctx.fillStyle = materialRegionColor(polygon.kx, polygon.ky);
     ctx.fill();
-    ctx.strokeStyle = RENDER_STYLE.noFlowColor;
+    drawMaterialAnisotropyHatch(screenVertices, polygon.kx, polygon.ky);
+    ctx.strokeStyle = 'rgba(30, 45, 60, 0.55)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
-  });
+    return;
+  }
+  ctx.fillStyle = RENDER_STYLE.noFlowColor;
+  ctx.fill();
+  ctx.strokeStyle = RENDER_STYLE.noFlowColor;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
 }
 
 function tracePolygonPath(vertices: Point[]): void {
@@ -3327,10 +3496,15 @@ function materialRegionColor(kx: number, ky: number): string {
   const logMin = Math.log10(MATERIAL_K_MIN);
   const logMax = Math.log10(MATERIAL_K_MAX);
   const t = clamp((Math.log10(geometricMean) - logMin) / (logMax - logMin), 0, 1);
-  const hue = MATERIAL_COLOR_HUE_START - MATERIAL_COLOR_HUE_SPAN * t;
-  const saturation = MATERIAL_COLOR_SAT_START - MATERIAL_COLOR_SAT_SPAN * t;
-  const lightness = MATERIAL_COLOR_LIGHT_START - MATERIAL_COLOR_LIGHT_SPAN * t;
-  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+  const scaled = t * (MATERIAL_COLOR_LUT.length - 1);
+  const index = Math.floor(scaled);
+  const mix = scaled - index;
+  const low = MATERIAL_COLOR_LUT[index];
+  const high = MATERIAL_COLOR_LUT[Math.min(index + 1, MATERIAL_COLOR_LUT.length - 1)];
+  const r = Math.round(low[0] + (high[0] - low[0]) * mix);
+  const g = Math.round(low[1] + (high[1] - low[1]) * mix);
+  const b = Math.round(low[2] + (high[2] - low[2]) * mix);
+  return `rgb(${r} ${g} ${b})`;
 }
 
 function drawMaterialAnisotropyHatch(vertices: Point[], kx: number, ky: number): void {
@@ -3410,51 +3584,49 @@ function placeLabelNearAnchor(
   return { x, y };
 }
 
-function drawBoundaries(view: CanvasView): void {
-  state.lineBoundaries.forEach((line) => {
-    const lineVertices = getLineVertices(line);
-    if (lineVertices.length < 2) {
-      return;
-    }
+function drawLineBoundary(view: CanvasView, line: LineBoundary): void {
+  const lineVertices = getLineVertices(line);
+  if (lineVertices.length < 2) {
+    return;
+  }
 
-    if (line.kind === 'equipotential') {
-      ctx.setLineDash([]);
-      ctx.strokeStyle = RENDER_STYLE.equipotentialColor;
-      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
-    } else if (line.kind === 'phreatic') {
-      ctx.setLineDash([7, 5]);
-      ctx.strokeStyle = RENDER_STYLE.phreaticColor;
-      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
-    } else {
-      ctx.setLineDash([]);
-      ctx.strokeStyle = RENDER_STYLE.noFlowColor;
-      ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
-    }
-
-    const first = worldToScreen(lineVertices[0], view);
-    ctx.beginPath();
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < lineVertices.length; i += 1) {
-      const point = worldToScreen(lineVertices[i], view);
-      ctx.lineTo(point.x, point.y);
-    }
-    ctx.stroke();
+  if (line.kind === 'equipotential') {
     ctx.setLineDash([]);
+    ctx.strokeStyle = RENDER_STYLE.equipotentialColor;
+    ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
+  } else if (line.kind === 'phreatic') {
+    ctx.setLineDash([7, 5]);
+    ctx.strokeStyle = RENDER_STYLE.phreaticColor;
+    ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
+  } else {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = RENDER_STYLE.noFlowColor;
+    ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
+  }
 
-    const mid = worldToScreen(samplePointOnPolyline(lineVertices, 0.5), view);
-    ctx.fillStyle = '#111827';
-    let label = '';
+  const first = worldToScreen(lineVertices[0], view);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  for (let i = 1; i < lineVertices.length; i += 1) {
+    const point = worldToScreen(lineVertices[i], view);
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-    if (line.kind === 'equipotential') {
-      label = `EP ${line.head.toFixed(1)}m`;
-    } else if (line.kind === 'phreatic') {
-      label = 'Phreatic';
-    } else {
-      label = 'No-flow';
-    }
-    const labelPos = placeLabelNearAnchor(label, mid, view);
-    ctx.fillText(label, labelPos.x, labelPos.y);
-  });
+  const mid = worldToScreen(samplePointOnPolyline(lineVertices, 0.5), view);
+  ctx.fillStyle = '#111827';
+  let label = '';
+
+  if (line.kind === 'equipotential') {
+    label = `EP ${line.head.toFixed(1)}m`;
+  } else if (line.kind === 'phreatic') {
+    label = 'Phreatic';
+  } else {
+    label = 'Impermeable';
+  }
+  const labelPos = placeLabelNearAnchor(label, mid, view);
+  ctx.fillText(label, labelPos.x, labelPos.y);
 }
 
 function drawHeadColorbar(view: CanvasView, solution: Solution): void {
@@ -3824,6 +3996,7 @@ function exportCanvasPng(): void {
 }
 
 function exportStateJson(): void {
+  syncBoundaryOrder();
   const snapshot: PersistedFlowNetStateV1 = {
     schema: 'flownet2-state',
     version: 1,
@@ -3845,6 +4018,7 @@ function exportStateJson(): void {
       kx: polygon.kx,
       ky: polygon.ky,
     })),
+    boundaryOrder: state.boundaryOrder.map((item) => ({ kind: item.kind, id: item.id })),
     standpipePoint: state.standpipePoint ? { ...state.standpipePoint } : null,
   };
 
@@ -3911,6 +4085,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
   const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
   const lines = readPersistedLines(root.lines);
   const polygons = readPolygons(root.polygons, solver);
+  const boundaryOrder = readBoundaryOrder(root.boundaryOrder, lines, polygons);
   const standpipePoint = readOptionalPoint(root.standpipePoint, 'standpipePoint');
 
   return {
@@ -3923,6 +4098,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
     newHead,
     lines,
     polygons,
+    boundaryOrder,
     standpipePoint,
   };
 }
@@ -3954,6 +4130,8 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
     kx: clamp(polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX),
     ky: clamp(polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
   }));
+  state.boundaryOrder = (imported.boundaryOrder ?? []).map((item) => ({ kind: item.kind, id: item.id }));
+  syncBoundaryOrder();
 
   const maxBoundaryId = state.lineBoundaries.reduce((maxId, line) => Math.max(maxId, line.id), 0);
   const maxPolygonId = state.polygons.reduce((maxId, polygon) => Math.max(maxId, polygon.id), 0);
@@ -4033,6 +4211,41 @@ function readPolygons(value: unknown, solver?: SolverSettings): NoFlowPolygon[] 
     const ky = readOptionalNumberValue(record.ky, MATERIAL_K_MIN, MATERIAL_K_MAX, fallbackKy, `polygons[${index}].ky`);
     return { id, vertices, regionType, kx, ky };
   });
+}
+
+function readBoundaryOrder(value: unknown, lines: LineBoundary[], polygons: NoFlowPolygon[]): BoundaryRef[] {
+  if (typeof value === 'undefined') {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('boundaryOrder must be an array when provided.');
+  }
+
+  const lineIds = new Set(lines.map((line) => line.id));
+  const polygonIds = new Set(polygons.map((polygon) => polygon.id));
+  const result: BoundaryRef[] = [];
+  const seen = new Set<string>();
+
+  value.forEach((entry, index) => {
+    const record = asRecord(entry, `boundaryOrder[${index}]`);
+    const kind = record.kind === 'line' || record.kind === 'polygon' ? record.kind : null;
+    if (!kind) {
+      throw new Error(`boundaryOrder[${index}].kind must be "line" or "polygon".`);
+    }
+    const id = readInteger(record.id, `boundaryOrder[${index}].id`, 1, 1_000_000);
+    const exists = kind === 'line' ? lineIds.has(id) : polygonIds.has(id);
+    if (!exists) {
+      return;
+    }
+    const key = `${kind}:${id}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push({ kind, id });
+  });
+
+  return result;
 }
 
 function readOptionalPoint(value: unknown, label: string): Point | null {

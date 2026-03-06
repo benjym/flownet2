@@ -62,6 +62,14 @@ test.describe('Flow Net Studio student workflow', () => {
     return [Number(match[1]), Number(match[2])];
   };
 
+  const parseNoFlowPolygonId = (text: string): number => {
+    const match = text.match(/No-flow polygon #(\d+)/);
+    if (!match) {
+      throw new Error(`Unable to parse polygon id from: ${text}`);
+    }
+    return Number(match[1]);
+  };
+
   test('student can draw BCs, solve, probe with standpipe, and export PNG', async ({ page }) => {
     await page.goto('/');
 
@@ -198,6 +206,53 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#selectedHeadRow')).not.toHaveClass(/is-hidden/);
   });
 
+  test('reordering boundary list updates polygon z-order hit selection', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const clickCanvas = async (rx: number, ry: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
+    };
+    const dragCanvasRect = async (startRx: number, startRy: number, endRx: number, endRy: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.move(box.x + box.width * startRx, box.y + box.height * startRy);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * endRx, box.y + box.height * endRy);
+      await page.mouse.up();
+    };
+
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
+    await dragCanvasRect(0.38, 0.48, 0.58, 0.68);
+    await dragCanvasRect(0.45, 0.55, 0.65, 0.75);
+
+    await page.locator('#toolRow button[data-tool="select"]').click();
+
+    const polygonItems = page.locator('#inventoryList .inventory-item', { hasText: /^No-flow polygon #/ });
+    const topPolygonItem = polygonItems.nth(0);
+    const secondPolygonItem = polygonItems.nth(1);
+    const topPolygonId = parseNoFlowPolygonId(await topPolygonItem.innerText());
+    const secondPolygonId = parseNoFlowPolygonId(await secondPolygonItem.innerText());
+
+    await clickCanvas(0.53, 0.63);
+    await expect(page.locator('#inventoryList .inventory-item.is-selected').first())
+      .toContainText(new RegExp(`No-flow polygon #${topPolygonId}`));
+
+    await secondPolygonItem.dragTo(topPolygonItem, { targetPosition: { x: 8, y: 2 } });
+
+    await clickCanvas(0.53, 0.63);
+    await expect(page.locator('#inventoryList .inventory-item.is-selected').first())
+      .toContainText(new RegExp(`No-flow polygon #${secondPolygonId}`));
+  });
+
   test('mobile layout keeps canvas visible and above controls', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
@@ -274,7 +329,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const flTool = page.locator('#toolRow button[data-tool="noflow-line"]');
     const phreaticTool = page.locator('#toolRow button[data-tool="phreatic"]');
     const impermeableAreaTool = page.locator('#toolRow button[data-tool="noflow-zone"]');
-    const materialAreaTool = page.locator('#toolRow button[data-tool="material-zone"]');
+    const materialAreaTool = page.locator('#toolRow button[data-tool="soil"]');
     const standpipeTool = page.locator('#toolRow button[data-tool="standpipe"]');
 
     await expect(selectTool).toHaveAttribute('title', /Space/);
@@ -706,7 +761,7 @@ test.describe('Flow Net Studio student workflow', () => {
       y: box!.y + box!.height * ry,
     });
 
-    await page.locator('#toolRow button[data-tool="material-zone"]').click();
+    await page.locator('#toolRow button[data-tool="soil"]').click();
     await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
 
     const newMaterialKxInput = page.locator('#newMaterialKx');

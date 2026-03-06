@@ -322,7 +322,7 @@ button.danger {
 }
 
 .is-hidden {
-  display: none;
+  display: none !important;
 }
 
 .group ul {
@@ -596,7 +596,7 @@ button.danger {
   font-size: 0.83rem;
 }
 
-.guide-section li + li {
+.guide-section li+li {
   margin-top: 0.28rem;
 }
 
