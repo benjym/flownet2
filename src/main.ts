@@ -1,4 +1,4 @@
-type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'soil' | 'standpipe';
+type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'void' | 'soil' | 'standpipe';
 type LineKind = 'equipotential' | 'phreatic' | 'noflow';
 type CoordinateMode = 'real' | 'transformed';
 
@@ -17,7 +17,7 @@ interface LineBoundary {
 interface NoFlowPolygon {
   id: number;
   vertices: Point[];
-  regionType: 'noflow' | 'material';
+  regionType: 'noflow' | 'void' | 'material';
   kx: number;
   ky: number;
 }
@@ -43,6 +43,8 @@ interface ViewSettings {
   autoSolve: boolean;
   coordinateMode: CoordinateMode;
   showHeadMap: boolean;
+  textbookScaleBar: boolean;
+  hideEpValues: boolean;
 }
 
 interface ContourSegment {
@@ -82,7 +84,7 @@ interface PresetLine {
 
 interface PresetPolygon {
   vertices: Point[];
-  regionType?: 'noflow' | 'material';
+  regionType?: 'noflow' | 'void' | 'material';
   kx?: number;
   ky?: number;
 }
@@ -152,7 +154,8 @@ interface RenderStyleTokens {
   flowLineColor: string;
   equipotentialColor: string;
   phreaticColor: string;
-  noFlowColor: string;
+  impermeableColor: string;
+  voidColor: string;
   flowLineWidth: number;
   equipotentialWidth: number;
 }
@@ -241,6 +244,7 @@ const cursorReadout = byId<HTMLSpanElement>('cursorReadout');
 const guideToggleBtn = byId<HTMLButtonElement>('guideToggleBtn');
 const guideOverlay = byId<HTMLDivElement>('guideOverlay');
 const guideCloseBtn = byId<HTMLButtonElement>('guideCloseBtn');
+const toggleTextbookViewBtn = byId<HTMLButtonElement>('toggleTextbookViewBtn');
 const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
 
@@ -252,6 +256,7 @@ const TOOL_SHORTCUT_INFO: Record<Tool, { label: string; aria: string }> = {
   phreatic: { label: 'P', aria: 'P' },
   'noflow-line': { label: 'F', aria: 'F' },
   'noflow-zone': { label: 'I', aria: 'I' },
+  void: { label: 'V', aria: 'V' },
   'soil': { label: 'M', aria: 'M' },
   standpipe: { label: 'S', aria: 'S' },
 };
@@ -276,6 +281,8 @@ const state = {
     autoSolve: true,
     coordinateMode: 'real',
     showHeadMap: false,
+    textbookScaleBar: false,
+    hideEpValues: false,
   } as ViewSettings,
   tool: 'select' as Tool,
   pendingLineStart: null as Point | null,
@@ -361,7 +368,8 @@ function readRenderStyleTokens(): RenderStyleTokens {
     flowLineColor: readCssVar('--flow-line', '#0000ff'),
     equipotentialColor: readCssVar('--equipotential', '#ff0000'),
     phreaticColor: readCssVar('--phreatic', '#1d4ed8'),
-    noFlowColor: readCssVar('--no-flow', '#ffffff'),
+    impermeableColor: readCssVar('--impermeable', '#4b5563'),
+    voidColor: readCssVar('--void', '#ffffff'),
     flowLineWidth: readCssVarNumber('--flow-line-width', 2.4),
     equipotentialWidth: readCssVarNumber('--equipotential-width', 2.8),
   };
@@ -439,6 +447,8 @@ async function loadExamplePresets(): Promise<ExamplePreset[]> {
       view: {
         ...preset.view,
         showHeadMap: Boolean(preset.view.showHeadMap),
+        textbookScaleBar: Boolean(preset.view.textbookScaleBar),
+        hideEpValues: Boolean(preset.view.hideEpValues),
       },
     };
   });
@@ -510,7 +520,8 @@ function loadExampleById(
     state.polygons.push({
       id: state.nextId++,
       vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
-      regionType: polygon.regionType === 'material' ? 'material' : 'noflow',
+      regionType:
+        polygon.regionType === 'material' || polygon.regionType === 'void' ? polygon.regionType : 'noflow',
       kx: clamp(typeof polygon.kx === 'number' ? polygon.kx : state.solver.kx, MATERIAL_K_MIN, MATERIAL_K_MAX),
       ky: clamp(typeof polygon.ky === 'number' ? polygon.ky : state.solver.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
     });
@@ -531,6 +542,7 @@ function loadExampleById(
   coordModeSelect.value = state.view.coordinateMode;
   showHeadMapInput.checked = state.view.showHeadMap;
   autoSolveInput.checked = state.view.autoSolve;
+  updateTextbookToolbarUI();
   exampleSelect.value = preset.id;
 
   setTool('select');
@@ -600,6 +612,18 @@ function wireControls(): void {
 
   showHeadMapInput.addEventListener('change', () => {
     state.view.showHeadMap = showHeadMapInput.checked;
+    render();
+  });
+
+  toggleTextbookViewBtn.addEventListener('click', () => {
+    const nextEnabled = !(state.view.textbookScaleBar && state.view.hideEpValues);
+    state.view.textbookScaleBar = nextEnabled;
+    state.view.hideEpValues = nextEnabled;
+    if (nextEnabled && state.selected) {
+      state.selected = null;
+      updateSelectionPanel();
+    }
+    updateTextbookToolbarUI();
     render();
   });
 
@@ -682,6 +706,13 @@ function wireControls(): void {
     button.addEventListener('click', () => {
       const toolValue = parseTool(button.dataset.tool);
       if (!toolValue) {
+        return;
+      }
+      if (toolValue === 'standpipe' && state.tool === 'standpipe' && state.standpipePoint) {
+        state.standpipePoint = null;
+        state.standpipeReading = null;
+        setTool('select');
+        updateStandpipeReading();
         return;
       }
       setTool(toolValue);
@@ -941,6 +972,9 @@ function toolFromShortcut(event: KeyboardEvent): Tool | null {
   if (key === 'i') {
     return 'noflow-zone';
   }
+  if (key === 'v') {
+    return 'void';
+  }
   if (key === 'm') {
     return 'soil';
   }
@@ -992,6 +1026,7 @@ function parseTool(value: string | undefined): Tool | null {
     value === 'phreatic' ||
     value === 'noflow-line' ||
     value === 'noflow-zone' ||
+    value === 'void' ||
     value === 'soil' ||
     value === 'standpipe'
   ) {
@@ -1048,6 +1083,11 @@ function setTool(tool: Tool): void {
   updateGuidanceUI();
   render();
   updateCanvasCursor();
+}
+
+function updateTextbookToolbarUI(): void {
+  const enabled = state.view.textbookScaleBar && state.view.hideEpValues;
+  toggleTextbookViewBtn.setAttribute('aria-pressed', String(enabled));
 }
 
 function addBoundaryFromVertices(kind: LineKind, vertices: Point[], head: number): void {
@@ -1197,8 +1237,9 @@ function onPointerDown(event: PointerEvent): void {
     return;
   }
 
-  if (state.tool === 'noflow-zone' || state.tool === 'soil') {
-    state.drag = { type: 'polygon-draw', start: point, current: point };
+  if (state.tool === 'noflow-zone' || state.tool === 'void' || state.tool === 'soil') {
+    const snappedStart = snapPointToGridNode(point);
+    state.drag = { type: 'polygon-draw', start: snappedStart, current: snappedStart };
     updateGuidanceUI();
     render();
     updateCanvasCursor(point);
@@ -1207,16 +1248,17 @@ function onPointerDown(event: PointerEvent): void {
 
   if (state.tool === 'equipotential' || state.tool === 'phreatic' || state.tool === 'noflow-line') {
     if (!state.pendingLineStart) {
-      state.pendingLineStart = point;
-      state.previewPoint = point;
+      const snappedPoint = snapPointToGridNode(point);
+      state.pendingLineStart = snappedPoint;
+      state.previewPoint = snappedPoint;
       updateGuidanceUI();
       render();
-      updateCanvasCursor(point);
+      updateCanvasCursor(snappedPoint);
       return;
     }
 
     const start = state.pendingLineStart;
-    const end = clampPoint(point);
+    const end = snapPointToGridNode(clampPoint(point));
     state.pendingLineStart = null;
     state.previewPoint = null;
     updateGuidanceUI();
@@ -1234,6 +1276,7 @@ function onPointerDown(event: PointerEvent): void {
       phreatic: 'phreatic',
       'noflow-line': 'noflow',
       'noflow-zone': null,
+      void: null,
       'soil': null,
     };
 
@@ -1277,7 +1320,7 @@ function onPointerMove(event: PointerEvent): void {
   }
 
   if (state.drag.type === 'standpipe-move') {
-    const draggedPoint = clampPoint(screenToWorld(screenPoint, view));
+    const draggedPoint = snapPointToGridNode(clampPoint(screenToWorld(screenPoint, view)));
     state.hoverPoint = draggedPoint;
     state.standpipePoint = draggedPoint;
     updateStandpipeReading();
@@ -1292,12 +1335,13 @@ function onPointerMove(event: PointerEvent): void {
     return;
   }
   const point = clampPoint(screenToWorld(screenPoint, view));
+  const snappedPoint = snapPointToGridNode(point);
   state.hoverPoint = point;
   state.lastPointerType = event.pointerType || state.lastPointerType;
   updateCanvasCursor(point);
 
   if (state.pendingLineStart) {
-    state.previewPoint = point;
+    state.previewPoint = snappedPoint;
   }
 
   if (state.drag.type === 'line-vertex') {
@@ -1310,11 +1354,11 @@ function onPointerMove(event: PointerEvent): void {
     if (drag.vertexIndex < 0 || drag.vertexIndex >= vertices.length) {
       return;
     }
-    vertices[drag.vertexIndex] = clampPoint(point);
+    vertices[drag.vertexIndex] = snappedPoint;
     setLineVertices(line, vertices);
     scheduleSolve();
     render();
-    updateCanvasCursor(point);
+    updateCanvasCursor(snappedPoint);
     return;
   }
 
@@ -1324,8 +1368,8 @@ function onPointerMove(event: PointerEvent): void {
     if (!line) {
       return;
     }
-    const dxRaw = point.x - drag.startPointer.x;
-    const dyRaw = point.y - drag.startPointer.y;
+    const dxRaw = snappedPoint.x - drag.startPointer.x;
+    const dyRaw = snappedPoint.y - drag.startPointer.y;
 
     const startBounds = polygonBoundsFromVertices(drag.startVertices);
     const minX = startBounds.minX;
@@ -1343,7 +1387,7 @@ function onPointerMove(event: PointerEvent): void {
     setLineVertices(line, movedVertices);
     scheduleSolve();
     render();
-    updateCanvasCursor(point);
+    updateCanvasCursor(snappedPoint);
     return;
   }
 
@@ -1353,8 +1397,8 @@ function onPointerMove(event: PointerEvent): void {
     if (!polygon) {
       return;
     }
-    const dxRaw = point.x - drag.startPointer.x;
-    const dyRaw = point.y - drag.startPointer.y;
+    const dxRaw = snappedPoint.x - drag.startPointer.x;
+    const dyRaw = snappedPoint.y - drag.startPointer.y;
 
     const startBounds = polygonBoundsFromVertices(drag.startVertices);
     const dx = clamp(dxRaw, -startBounds.minX, state.domain.width - startBounds.maxX);
@@ -1366,7 +1410,7 @@ function onPointerMove(event: PointerEvent): void {
     }));
     scheduleSolve();
     render();
-    updateCanvasCursor(point);
+    updateCanvasCursor(snappedPoint);
     return;
   }
 
@@ -1376,17 +1420,17 @@ function onPointerMove(event: PointerEvent): void {
     if (!polygon || drag.vertexIndex < 0 || drag.vertexIndex >= polygon.vertices.length) {
       return;
     }
-    polygon.vertices[drag.vertexIndex] = clampPoint(point);
+    polygon.vertices[drag.vertexIndex] = snappedPoint;
     scheduleSolve();
     render();
-    updateCanvasCursor(point);
+    updateCanvasCursor(snappedPoint);
     return;
   }
 
   if (state.drag.type === 'polygon-draw') {
-    state.drag.current = point;
+    state.drag.current = snappedPoint;
     render();
-    updateCanvasCursor(point);
+    updateCanvasCursor(snappedPoint);
     return;
   }
 
@@ -1405,6 +1449,7 @@ function onPointerUp(event: PointerEvent): void {
 
   if (point && state.drag.type === 'polygon-draw') {
     const isMaterialZone = state.tool === 'soil';
+    const isVoidZone = state.tool === 'void';
     let materialKx = state.solver.kx;
     let materialKy = state.solver.ky;
     if (isMaterialZone) {
@@ -1416,7 +1461,7 @@ function onPointerUp(event: PointerEvent): void {
     const polygon = createPolygonFromDrag(
       state.drag.start,
       state.drag.current,
-      isMaterialZone ? 'material' : 'noflow',
+      isMaterialZone ? 'material' : isVoidZone ? 'void' : 'noflow',
       materialKx,
       materialKy,
     );
@@ -1626,7 +1671,7 @@ function startSelectionDrag(point: Point, screenPoint: Point, event: PointerEven
         state.drag = {
           type: 'line-move',
           id: line.id,
-          startPointer: point,
+          startPointer: snapPointToGridNode(point),
           startVertices: getLineVertices(line).map((vertex) => ({ ...vertex })),
         };
       }
@@ -1636,7 +1681,7 @@ function startSelectionDrag(point: Point, screenPoint: Point, event: PointerEven
         state.drag = {
           type: 'polygon-move',
           id: polygon.id,
-          startPointer: point,
+          startPointer: snapPointToGridNode(point),
           startVertices: polygon.vertices.map((vertex) => ({ ...vertex })),
         };
       }
@@ -1950,6 +1995,21 @@ function clampPoint(point: Point): Point {
   };
 }
 
+function snapPointToGridNode(point: Point): Point {
+  const nx = Math.max(2, state.solver.nx);
+  const ny = Math.max(2, state.solver.ny);
+  const dx = state.domain.width / (nx - 1);
+  const dy = state.domain.height / (ny - 1);
+
+  const i = clamp(Math.round(point.x / dx), 0, nx - 1);
+  const j = clamp(Math.round(point.y / dy), 0, ny - 1);
+
+  return {
+    x: i * dx,
+    y: j * dy,
+  };
+}
+
 function polygonBoundsFromVertices(vertices: Point[]): { minX: number; maxX: number; minY: number; maxY: number } {
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -2013,12 +2073,14 @@ function solveAndRender(): void {
 function updateGuidanceUI(): void {
   const toolKey = state.tool as string;
   const soilToolSelected = toolKey === 'soil';
+  const voidToolSelected = toolKey === 'void';
   const hints: Record<Tool, string> = {
     select: 'Select and drag endpoints/lines/polygons to edit geometry and BCs. Right-click a region for material settings.',
     equipotential: 'Draw a fixed-head equipotential (EP) line.',
     phreatic: 'Draw a user-defined phreatic line (head = elevation).',
     'noflow-line': 'Draw an impermeable line.',
     'noflow-zone': 'Draw an impermeable region.',
+    void: 'Draw a void region (solver treats it as impermeable).',
     'soil': 'Draw a material region and set Kx/Ky before placement.',
     standpipe: 'Click or drag to place/move the standpipe and read pressure head and rise.',
   };
@@ -2034,7 +2096,7 @@ function updateGuidanceUI(): void {
     stepText = state.pendingLineStart
       ? 'Step 2 of 2: click second endpoint to finish this line. Press Esc to cancel.'
       : 'Step 1 of 2: click first endpoint for a new line.';
-  } else if (state.tool === 'noflow-zone' || soilToolSelected) {
+  } else if (state.tool === 'noflow-zone' || voidToolSelected || soilToolSelected) {
     stepText = state.drag.type === 'polygon-draw'
       ? 'Step 2 of 2: drag and release to set initial polygon size. Press Esc to cancel.'
       : 'Step 1 of 2: click and drag to create an initial polygon.';
@@ -2090,6 +2152,8 @@ function updateBoundaryInventory(): void {
         const anisotropy = polygon.kx / Math.max(polygon.ky, 1e-9);
         button.textContent =
           `Material region #${polygon.id} (Kx=${polygon.kx.toFixed(2)}, Ky=${polygon.ky.toFixed(2)}, Kx/Ky=${anisotropy.toFixed(2)})`;
+      } else if (polygon.regionType === 'void') {
+        button.textContent = `Void polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
       } else {
         button.textContent = `Impermeable polygon #${polygon.id} (${polygon.vertices.length} vertices)`;
       }
@@ -2285,12 +2349,16 @@ function updateSelectionPanel(): void {
     selectedPolygonMaterialText.textContent = `Material region active. Geometric mean K = ${Math.sqrt(
       polygon.kx * polygon.ky,
     ).toFixed(2)}.`;
+  } else if (polygon.regionType === 'void') {
+    selectedPolygonMaterialText.textContent = 'Void region. Solver treats this as impermeable.';
   } else {
     selectedPolygonMaterialText.textContent = 'Impermeable region. Convert to material to assign local Kx/Ky.';
   }
   selectedPolygonSwatch.style.background = polygon.regionType === 'material'
     ? materialRegionColor(polygon.kx, polygon.ky)
-    : RENDER_STYLE.noFlowColor;
+    : polygon.regionType === 'void'
+      ? RENDER_STYLE.voidColor
+      : RENDER_STYLE.impermeableColor;
   deleteBtn.classList.remove('is-hidden');
   updateBoundaryInventory();
   updateGuidanceUI();
@@ -2347,11 +2415,24 @@ function solveGroundwater(
   const noFlowPolygons = polygons.filter((polygon) => polygon.regionType !== 'material');
   const materialPolygons = polygons.filter((polygon) => polygon.regionType === 'material');
 
-  const bandThickness = 0.5 * Math.min(dx, dy);
-  const noFlowPaddingCells = 1;
+  const edgeTolerance = 1e-6 * Math.min(dx, dy);
+  const noFlowBoundaryBand = 0.3 * Math.min(dx, dy);
+  const noFlowPaddingCells = 0;
   const noFlowMask = Array.from({ length: ny }, () => Array.from({ length: nx }, () => false));
+  const fixedNodeMask = Array.from({ length: ny }, () => Array.from({ length: nx }, () => false));
   const cellKx = Array.from({ length: ny }, () => Array.from({ length: nx }, () => kx));
   const cellKy = Array.from({ length: ny }, () => Array.from({ length: nx }, () => ky));
+
+  const fixedLineNodes = fixedLines.map((line) => ({
+    line,
+    nodes: rasterizeBoundaryLineNodes(line, domain, solver, 0),
+  }));
+
+  fixedLineNodes.forEach(({ nodes }) => {
+    nodes.forEach(({ i, j }) => {
+      fixedNodeMask[j][i] = true;
+    });
+  });
 
   noFlowLines.forEach((line) => {
     const nodes = rasterizeBoundaryLineNodes(line, domain, solver, noFlowPaddingCells);
@@ -2368,7 +2449,7 @@ function solveGroundwater(
         const point = { x: i * dx, y: j * dy };
         if (
           pointInPolygon(point, polygon.vertices) ||
-          distancePointToPolygonEdges(point, polygon.vertices) <= bandThickness
+          distancePointToPolygonEdges(point, polygon.vertices) <= edgeTolerance
         ) {
           cellKx[j][i] = localKx;
           cellKy[j][i] = localKy;
@@ -2380,6 +2461,9 @@ function solveGroundwater(
   for (let j = 0; j < ny; j += 1) {
     for (let i = 0; i < nx; i += 1) {
       const point = { x: i * dx, y: j * dy };
+      if (fixedNodeMask[j][i]) {
+        continue;
+      }
       if (noFlowMask[j][i]) {
         active[j][i] = false;
         continue;
@@ -2387,7 +2471,7 @@ function solveGroundwater(
       if (
         noFlowPolygons.some((polygon) =>
           pointInPolygon(point, polygon.vertices) ||
-          distancePointToPolygonEdges(point, polygon.vertices) <= bandThickness,
+          distancePointToPolygonEdges(point, polygon.vertices) <= noFlowBoundaryBand,
         )
       ) {
         active[j][i] = false;
@@ -2398,9 +2482,8 @@ function solveGroundwater(
   let dirichletCount = 0;
   let fixedHeadSum = 0;
 
-  fixedLines.forEach((line) => {
+  fixedLineNodes.forEach(({ line, nodes }) => {
     const lineVertices = getLineVertices(line);
-    const nodes = rasterizeBoundaryLineNodes(line, domain, solver, 0);
     nodes.forEach(({ i, j }) => {
       if (!active[j][i]) {
         return;
@@ -2540,8 +2623,9 @@ function solveGroundwater(
   }
 
   const contourLevels = buildContourLevels(minHead, maxHead, view.contours);
+  const contourField = buildContourGhostField(heads, active);
   const contourSegments = contourLevels.length > 0
-    ? marchingSquares(heads, active, domain, solver, contourLevels)
+    ? marchingSquares(contourField.heads, contourField.active, domain, solver, contourLevels)
     : [];
 
   const streamPaths = computeStreamlines(domain, solver, qx, qy, active, lineBoundaries, view.streamlines);
@@ -2625,6 +2709,53 @@ function buildContourLevels(minHead: number, maxHead: number, count: number): nu
     levels.push(minHead + step * idx);
   }
   return levels;
+}
+
+function buildContourGhostField(
+  heads: number[][],
+  active: boolean[][],
+): { heads: number[][]; active: boolean[][] } {
+  const ny = heads.length;
+  const nx = ny > 0 ? heads[0].length : 0;
+  const ghostHeads = heads.map((row) => row.slice());
+  const ghostActive = active.map((row) => row.slice());
+
+  for (let j = 0; j < ny; j += 1) {
+    for (let i = 0; i < nx; i += 1) {
+      if (active[j][i]) {
+        continue;
+      }
+
+      let sum = 0;
+      let count = 0;
+      for (let dj = -1; dj <= 1; dj += 1) {
+        for (let di = -1; di <= 1; di += 1) {
+          if (di === 0 && dj === 0) {
+            continue;
+          }
+          const ni = i + di;
+          const nj = j + dj;
+          if (ni < 0 || ni >= nx || nj < 0 || nj >= ny) {
+            continue;
+          }
+          if (!active[nj][ni]) {
+            continue;
+          }
+          sum += heads[nj][ni];
+          count += 1;
+        }
+      }
+
+      if (count === 0) {
+        continue;
+      }
+
+      ghostHeads[j][i] = sum / count;
+      ghostActive[j][i] = true;
+    }
+  }
+
+  return { heads: ghostHeads, active: ghostActive };
 }
 
 function marchingSquares(
@@ -3122,8 +3253,8 @@ function traceStream(
   active: boolean[][],
 ): Point[] {
   const points: Point[] = [seed];
-  const stepLength = 0.35 * Math.min(domain.width / (solver.nx - 1), domain.height / (solver.ny - 1));
-  const maxSteps = 2400;
+  const stepLength = 0.2 * Math.min(domain.width / (solver.nx - 1), domain.height / (solver.ny - 1));
+  const maxSteps = 4200;
 
   for (let step = 0; step < maxSteps; step += 1) {
     const current = points[points.length - 1];
@@ -3145,6 +3276,10 @@ function traceStream(
 
     const midVelocity = interpolateVectorField(qx, qy, active, domain, solver, midPoint);
     if (!midVelocity) {
+      const boundaryPoint = lastActivePointAlongSegment(current, midPoint, domain, solver, active);
+      if (boundaryPoint && distance(current, boundaryPoint) >= 1e-6) {
+        points.push(boundaryPoint);
+      }
       break;
     }
 
@@ -3158,6 +3293,10 @@ function traceStream(
     }
 
     if (!isPointActive(next, domain, solver, active)) {
+      const boundaryPoint = lastActivePointAlongSegment(current, next, domain, solver, active);
+      if (boundaryPoint && distance(current, boundaryPoint) >= 1e-6) {
+        points.push(boundaryPoint);
+      }
       break;
     }
 
@@ -3169,6 +3308,38 @@ function traceStream(
   }
 
   return points;
+}
+
+function lastActivePointAlongSegment(
+  start: Point,
+  end: Point,
+  domain: DomainSettings,
+  solver: SolverSettings,
+  active: boolean[][],
+): Point | null {
+  if (!isPointActive(start, domain, solver, active)) {
+    return null;
+  }
+  if (isPointActive(end, domain, solver, active)) {
+    return end;
+  }
+
+  let low = { ...start };
+  let high = { ...end };
+
+  for (let iter = 0; iter < 24; iter += 1) {
+    const mid = {
+      x: 0.5 * (low.x + high.x),
+      y: 0.5 * (low.y + high.y),
+    };
+    if (isPointActive(mid, domain, solver, active)) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
 }
 
 function interpolateVectorField(
@@ -3336,12 +3507,18 @@ function render(): void {
 
 function drawDomainOutline(view: CanvasView): void {
   const { viewport, bounds } = view;
-  const displayBounds = mapBoundsToDisplay(bounds);
-  const xSuffix = transformedCoordinatesActive() ? " x'" : ' m';
-  const ySuffix = transformedCoordinatesActive() ? " y'" : ' m';
   ctx.strokeStyle = '#213547';
   ctx.lineWidth = 2;
   ctx.strokeRect(viewport.left, viewport.top, viewport.width, viewport.height);
+
+  if (state.view.textbookScaleBar) {
+    drawScaleBar(view);
+    return;
+  }
+
+  const displayBounds = mapBoundsToDisplay(bounds);
+  const xSuffix = transformedCoordinatesActive() ? " x'" : ' m';
+  const ySuffix = transformedCoordinatesActive() ? " y'" : ' m';
 
   ctx.fillStyle = '#102332';
   const xMin = displayBounds.xMin.toFixed(1);
@@ -3362,6 +3539,85 @@ function drawDomainOutline(view: CanvasView): void {
   ctx.restore();
 }
 
+function drawScaleBar(view: CanvasView): void {
+  const displayBounds = mapBoundsToDisplay(view.bounds);
+  const unitsPerPixel = displayBounds.width / Math.max(view.viewport.width, 1);
+  if (unitsPerPixel <= 0) {
+    return;
+  }
+
+  const targetPixels = clamp(0.24 * view.viewport.width, 80, 180);
+  const rawUnits = targetPixels * unitsPerPixel;
+  const units = Math.min(niceScaleLength(rawUnits), displayBounds.width * 0.9);
+  const barWidth = Math.max(26, units / unitsPerPixel);
+
+  const height = 8;
+  const transformed = transformedCoordinatesActive();
+  const unitLabel = transformed ? "x'" : 'm';
+  const label = `${formatScaleLabel(units)} ${unitLabel}`;
+
+  ctx.save();
+  ctx.font = '600 11px "Montserrat", sans-serif';
+  const panelPaddingX = 8;
+  const panelPaddingY = 6;
+  const labelGap = 4;
+  const labelWidth = ctx.measureText(label).width;
+  const panelWidth = Math.max(barWidth + 2 * panelPaddingX, labelWidth + 2 * panelPaddingX);
+  const panelHeight = panelPaddingY + height + labelGap + 12 + panelPaddingY;
+  const panelX = view.viewport.left + 10;
+  const panelY = view.viewport.top + view.viewport.height - panelHeight - 10;
+  const barX = panelX + 0.5 * (panelWidth - barWidth);
+  const barY = panelY + panelPaddingY + height;
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.74)';
+  ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+
+  ctx.fillStyle = '#13283a';
+  ctx.fillRect(barX, barY - height, barWidth, height);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(barX, barY - height, barWidth * 0.5, height);
+
+  ctx.strokeStyle = '#13283a';
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(barX, barY - height, barWidth, height);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(label, panelX + 0.5 * panelWidth, barY + labelGap);
+  ctx.restore();
+}
+
+function niceScaleLength(raw: number): number {
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 1;
+  }
+  const exponent = Math.floor(Math.log10(raw));
+  const base = 10 ** exponent;
+  const normalized = raw / base;
+
+  if (normalized <= 1) {
+    return base;
+  }
+  if (normalized <= 2) {
+    return 2 * base;
+  }
+  if (normalized <= 5) {
+    return 5 * base;
+  }
+  return 10 * base;
+}
+
+function formatScaleLabel(value: number): string {
+  if (value >= 100) {
+    return value.toFixed(0);
+  }
+  if (value >= 10) {
+    return value.toFixed(1).replace(/\.0$/, '');
+  }
+  return value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function drawHeadShading(view: CanvasView, solution: Solution): void {
   const { heads, active, minHead, maxHead } = solution;
   const nx = state.solver.nx;
@@ -3377,8 +3633,14 @@ function drawHeadShading(view: CanvasView, solution: Solution): void {
 
   for (let j = 0; j < ny - 1; j += 1) {
     for (let i = 0; i < nx - 1; i += 1) {
-      const activeCell = active[j][i] && active[j][i + 1] && active[j + 1][i] && active[j + 1][i + 1];
-      if (!activeCell) {
+      const corners = [
+        { isActive: active[j][i], head: heads[j][i] },
+        { isActive: active[j][i + 1], head: heads[j][i + 1] },
+        { isActive: active[j + 1][i], head: heads[j + 1][i] },
+        { isActive: active[j + 1][i + 1], head: heads[j + 1][i + 1] },
+      ];
+      const activeCorners = corners.filter((corner) => corner.isActive);
+      if (activeCorners.length === 0) {
         continue;
       }
 
@@ -3390,7 +3652,7 @@ function drawHeadShading(view: CanvasView, solution: Solution): void {
         continue;
       }
 
-      const hAvg = 0.25 * (heads[j][i] + heads[j][i + 1] + heads[j + 1][i] + heads[j + 1][i + 1]);
+      const hAvg = activeCorners.reduce((sum, corner) => sum + corner.head, 0) / activeCorners.length;
       ctx.fillStyle = headColor(hAvg, minHead, maxHead);
       const topLeft = worldToScreen({ x: x0, y: y1 }, view);
       const bottomRight = worldToScreen({ x: x1, y: y0 }, view);
@@ -3470,9 +3732,17 @@ function drawPolygonBoundary(view: CanvasView, polygon: NoFlowPolygon): void {
     ctx.stroke();
     return;
   }
-  ctx.fillStyle = RENDER_STYLE.noFlowColor;
+  if (polygon.regionType === 'void') {
+    ctx.fillStyle = RENDER_STYLE.voidColor;
+    ctx.fill();
+    ctx.strokeStyle = RENDER_STYLE.voidColor;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    return;
+  }
+  ctx.fillStyle = RENDER_STYLE.impermeableColor;
   ctx.fill();
-  ctx.strokeStyle = RENDER_STYLE.noFlowColor;
+  ctx.strokeStyle = RENDER_STYLE.impermeableColor;
   ctx.lineWidth = 1.2;
   ctx.stroke();
 }
@@ -3600,7 +3870,7 @@ function drawLineBoundary(view: CanvasView, line: LineBoundary): void {
     ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
   } else {
     ctx.setLineDash([]);
-    ctx.strokeStyle = RENDER_STYLE.noFlowColor;
+    ctx.strokeStyle = RENDER_STYLE.impermeableColor;
     ctx.lineWidth = RENDER_STYLE.equipotentialWidth;
   }
 
@@ -3620,10 +3890,19 @@ function drawLineBoundary(view: CanvasView, line: LineBoundary): void {
 
   if (line.kind === 'equipotential') {
     label = `EP ${line.head.toFixed(1)}m`;
+    if (state.view.hideEpValues) {
+      label = '';
+    }
   } else if (line.kind === 'phreatic') {
     label = 'Phreatic';
+    if (state.view.hideEpValues) {
+      label = '';
+    }
   } else {
     label = 'Impermeable';
+  }
+  if (!label) {
+    return;
   }
   const labelPos = placeLabelNearAnchor(label, mid, view);
   ctx.fillText(label, labelPos.x, labelPos.y);
@@ -4080,6 +4359,8 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
     autoSolve: readBoolean(viewRecord.autoSolve, 'view.autoSolve'),
     coordinateMode,
     showHeadMap: readOptionalBoolean(viewRecord.showHeadMap, false, 'view.showHeadMap'),
+    textbookScaleBar: readOptionalBoolean(viewRecord.textbookScaleBar, false, 'view.textbookScaleBar'),
+    hideEpValues: readOptionalBoolean(viewRecord.hideEpValues, false, 'view.hideEpValues'),
   };
 
   const newHead = readNumberValue(root.newHead, 'newHead', -200, 200);
@@ -4126,7 +4407,8 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.polygons = imported.polygons.map((polygon) => ({
     id: polygon.id,
     vertices: polygon.vertices.map((vertex) => clampPoint(vertex)),
-    regionType: polygon.regionType === 'material' ? 'material' : 'noflow',
+    regionType:
+      polygon.regionType === 'material' || polygon.regionType === 'void' ? polygon.regionType : 'noflow',
     kx: clamp(polygon.kx, MATERIAL_K_MIN, MATERIAL_K_MAX),
     ky: clamp(polygon.ky, MATERIAL_K_MIN, MATERIAL_K_MAX),
   }));
@@ -4151,6 +4433,7 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   coordModeSelect.value = state.view.coordinateMode;
   showHeadMapInput.checked = state.view.showHeadMap;
   autoSolveInput.checked = state.view.autoSolve;
+  updateTextbookToolbarUI();
   newHeadInput.value = String(imported.newHead);
 
   clearExampleInUrl();
@@ -4204,7 +4487,9 @@ function readPolygons(value: unknown, solver?: SolverSettings): NoFlowPolygon[] 
     const vertices = record.vertices.map((vertex, vertexIndex) =>
       readPoint(vertex, `polygons[${index}].vertices[${vertexIndex}]`),
     );
-    const regionType = record.regionType === 'material' ? 'material' : 'noflow';
+    const regionType = record.regionType === 'material' || record.regionType === 'void'
+      ? record.regionType
+      : 'noflow';
     const fallbackKx = solver?.kx ?? 1;
     const fallbackKy = solver?.ky ?? 1;
     const kx = readOptionalNumberValue(record.kx, MATERIAL_K_MIN, MATERIAL_K_MAX, fallbackKx, `polygons[${index}].kx`);

@@ -20,7 +20,8 @@
   --flow-line: #0000ff;
   --equipotential: #ff0000;
   --phreatic: #1d4ed8;
-  --no-flow: #ffffff;
+  --impermeable: #4b5563;
+  --void: #ffffff;
   --soil: #8f6b43;
   --flow-line-width: 3;
   --equipotential-width: 3;
@@ -425,6 +426,33 @@ button.danger {
   margin-left: auto;
 }
 
+.textbook-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.15rem 0.25rem;
+  border: 1px solid #c3d0d9;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #f8fcff, #edf4f7);
+}
+
+.toolbar-icon-btn {
+  min-width: 7.2rem;
+  height: 2.1rem;
+  padding: 0 0.62rem;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.toolbar-icon-btn[aria-pressed="true"] {
+  border-color: var(--accent-strong);
+  background: linear-gradient(180deg, #d9f3ef, #bae9df);
+  color: #073a35;
+}
+
 .cursor-readout {
   flex: 0 0 auto;
   font-size: 0.78rem;
@@ -669,6 +697,18 @@ button.danger {
   .guide-toggle-btn {
     min-height: 34px;
     min-width: 34px;
+  }
+
+  .textbook-tools {
+    gap: 0.24rem;
+    padding: 0.12rem 0.2rem;
+  }
+
+  .toolbar-icon-btn {
+    min-height: 34px;
+    min-width: 6.2rem;
+    font-size: 0.68rem;
+    padding: 0 0.45rem;
   }
 
   .toolbar-toggle {

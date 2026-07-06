@@ -402,6 +402,7 @@
     "newHead": 10,
     "polygons": [
       {
+        "regionType": "void",
         "vertices": [
           {
             "x": 0,
@@ -422,6 +423,7 @@
         ]
       },
       {
+        "regionType": "void",
         "vertices": [
           {
             "x": 32,

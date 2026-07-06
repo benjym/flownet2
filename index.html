@@ -106,6 +106,7 @@
               <button data-tool="noflow-line">FL</button>
               <button data-tool="phreatic">Phreatic</button>
               <button data-tool="noflow-zone">Impermeable</button>
+              <button data-tool="void">Void</button>
               <button data-tool="soil">Soil</button>
               <button data-tool="standpipe">Standpipe</button>
             </div>
@@ -118,6 +119,9 @@
           </div>
           <div class="canvas-toolbar-right">
             <span id="cursorReadout" class="cursor-readout">x: -, y: -</span>
+            <!-- <div class="textbook-tools" role="group" aria-label="Textbook view controls"> -->
+            <button id="toggleTextbookViewBtn" class="toolbar-icon-btn" type="button" aria-pressed="false" aria-label="Toggle textbook view mode" title="Textbook view mode: scale bar and no EP value labels">Textbook View</button>
+            <!-- </div> -->
             <button id="guideToggleBtn" class="guide-toggle-btn" type="button" aria-label="Open instructions" title="Instructions" aria-controls="guideOverlay" aria-expanded="false">?</button>
             <label class="toolbar-toggle" title="Head values">
               <input id="showHeadMap" type="checkbox" aria-label="Toggle head values overlay">
@@ -162,6 +166,7 @@
             <li><strong>Phreatic:</strong> fixed head equal to elevation.</li>
             <li><strong>FL:</strong> impermeable no-flow line.</li>
             <li><strong>Impermeable Area:</strong> no-flow polygon.</li>
+            <li><strong>Void:</strong> white no-flow polygon (solver treats as impermeable).</li>
             <li><strong>Select:</strong> move/edit existing boundaries and polygons.</li>
           </ul>
         </section>
