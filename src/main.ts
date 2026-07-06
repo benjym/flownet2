@@ -317,6 +317,7 @@ let fileDragDepth = 0;
 let guideReturnFocus: HTMLElement | null = null;
 let draggingInventoryItem: BoundaryRef | null = null;
 let lineInventoryDropTarget: LineInventoryDropTarget | null = null;
+let initializePromise: Promise<void> | null = null;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
@@ -339,12 +340,26 @@ newMaterialWrap.classList.add('is-hidden');
 wireControls();
 resizeCanvas();
 updateCanvasCursor();
-void initializeExamplesAndSolve();
+initializePromise = initializeExamplesAndSolve();
+void initializePromise;
 window.addEventListener('resize', () => {
   resizeCanvas();
   render();
   updateCanvasCursor();
 });
+
+export const __test = {
+  getState: () => state,
+  setTool,
+  updateGuidanceUI,
+  updateCanvasCursor,
+  syncModifierState,
+  snapPointToGridNode,
+  getViewport,
+  waitForInitialization: async () => {
+    await initializePromise;
+  },
+};
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);

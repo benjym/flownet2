@@ -7,11 +7,15 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:legacy:e2e": "echo 'Legacy Playwright suite archived in tests-legacy/playwright/student-flow.spec.ts'"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
+    "@testing-library/dom": "^10.4.1",
+    "jsdom": "^26.1.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^3.2.4"
   }
 }
