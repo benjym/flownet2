@@ -157,7 +157,7 @@ describe('legacy coverage port', () => {
     });
   });
 
-  it('reordering line z-order changes hit selection', async () => {
+  it('reordering line z-order changes non-vertex hit selection', async () => {
     const app = await loadApp();
     const canvas = document.getElementById('flowCanvas') as HTMLCanvasElement;
 
@@ -170,8 +170,8 @@ describe('legacy coverage port', () => {
     fireEvent.pointerDown(canvas, { ...canvasPoint(0.68, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
 
     app.__test.setTool('select');
-    fireEvent.pointerDown(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
-    fireEvent.pointerUp(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.5, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(canvas, { ...canvasPoint(0.5, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
 
     const selectedBefore = app.__test.getState().selected;
     expect(selectedBefore?.kind).toBe('line');
@@ -189,12 +189,52 @@ describe('legacy coverage port', () => {
       'before',
     );
 
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.5, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(canvas, { ...canvasPoint(0.5, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+
+    const selectedAfter = app.__test.getState().selected;
+    const selectedAfterLine = app.__test.getState().lineBoundaries.find((line) => line.id === selectedAfter?.id);
+    expect(selectedAfterLine?.kind).toBe('equipotential');
+  });
+
+  it('shared point selection prioritizes the active object', async () => {
+    const app = await loadApp();
+    const canvas = document.getElementById('flowCanvas') as HTMLCanvasElement;
+
+    app.__test.setTool('equipotential');
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.68, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+
+    app.__test.setTool('noflow-line');
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.68, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+
+    app.__test.setTool('select');
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
+
+    const initiallySelected = app.__test.getState().selected;
+    expect(initiallySelected?.kind).toBe('line');
+    const initiallySelectedLine = app.__test.getState().lineBoundaries.find((line) => line.id === initiallySelected?.id);
+    expect(initiallySelectedLine?.kind).toBe('noflow');
+
+    const eqLine = app.__test.getState().lineBoundaries.find((line) => line.kind === 'equipotential' && line.id !== 1 && line.id !== 2);
+    const nfLine = app.__test.getState().lineBoundaries.find((line) => line.kind === 'noflow');
+    expect(eqLine).toBeTruthy();
+    expect(nfLine).toBeTruthy();
+
+    app.__test.reorderBoundaryZOrder(
+      { kind: 'line', id: eqLine!.id },
+      { kind: 'line', id: nfLine!.id },
+      'before',
+    );
+
     fireEvent.pointerDown(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
     fireEvent.pointerUp(canvas, { ...canvasPoint(0.32, 0.44), button: 0, pointerId: 1, pointerType: 'mouse' });
 
     const selectedAfter = app.__test.getState().selected;
     const selectedAfterLine = app.__test.getState().lineBoundaries.find((line) => line.id === selectedAfter?.id);
-    expect(selectedAfterLine?.kind).toBe('equipotential');
+    expect(selectedAfterLine?.kind).toBe('noflow');
   });
 
   it('reordering polygon z-order changes hit selection', async () => {

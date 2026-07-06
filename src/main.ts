@@ -1859,8 +1859,35 @@ function findPolygon(point: Point): NoFlowPolygon | null {
 
 function findBoundaryVertex(point: Point): BoundaryVertexHit | null {
   const threshold = 1.1 * pointerWorldThreshold();
+
+  if (state.tool === 'select' && state.selected) {
+    if (state.selected.kind === 'line') {
+      const line = state.lineBoundaries.find((item) => item.id === state.selected?.id);
+      if (line) {
+        const vertices = getLineVertices(line);
+        for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 1) {
+          if (distance(point, vertices[vertexIndex]) <= threshold) {
+            return { kind: 'line', id: line.id, vertexIndex };
+          }
+        }
+      }
+    } else {
+      const polygon = state.polygons.find((item) => item.id === state.selected?.id);
+      if (polygon) {
+        for (let vertexIndex = 0; vertexIndex < polygon.vertices.length; vertexIndex += 1) {
+          if (distance(point, polygon.vertices[vertexIndex]) <= threshold) {
+            return { kind: 'polygon', id: polygon.id, vertexIndex };
+          }
+        }
+      }
+    }
+  }
+
   const ordered = boundaryOrderTopFirst();
   for (const ref of ordered) {
+    if (state.tool === 'select' && state.selected && boundaryRefMatches(ref, state.selected)) {
+      continue;
+    }
     if (ref.kind === 'line') {
       const line = state.lineBoundaries.find((item) => item.id === ref.id);
       if (!line) {
