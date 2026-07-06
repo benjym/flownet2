@@ -126,6 +126,26 @@ beforeEach(() => {
     return ctx;
   });
 
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,abc');
+
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(() => 'blob:mock-state-url'),
+  });
+
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  });
+
+  Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  });
+
   Object.defineProperty(HTMLCanvasElement.prototype, 'setPointerCapture', {
     configurable: true,
     writable: true,

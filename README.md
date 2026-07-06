@@ -14,7 +14,8 @@ Students can:
 - Vite
 - Vanilla TypeScript (no React)
 - HTML Canvas rendering
-- Playwright end-to-end tests
+- Vitest + jsdom integration tests
+- Vitest unit tests for pure math/geometry helpers
 
 ## Getting Started
 
@@ -100,18 +101,46 @@ Examples:
 
 ## Testing
 
-Run end-to-end tests:
+Run the primary test suite:
 
 ```bash
-npm run test:e2e
+npm test
 ```
 
-Current suite covers:
-- Student draw/solve/probe/export flow
-- Guidance and keyboard behavior
-- Mobile layout behavior
-- Zoom/pan behavior
-- URL-based preset loading and preset switching
+Run in watch mode during development:
+
+```bash
+npm run test:watch
+```
+
+### Test strategy
+
+The active test stack is browserless and deterministic:
+
+- `tests/app.integration.test.ts`: jsdom-based app integration tests for core workflows
+- `tests/math.unit.test.ts`: fast pure unit tests for extracted math/geometry helpers in `src/math.ts`
+
+Current integration coverage includes:
+
+- textbook mode toggle behavior
+- draw guidance progression and escape cancellation
+- material/void region creation flows
+- select-mode modifier cursor behavior (`Alt`/`Ctrl`)
+- standpipe placement/clearing flow
+- keyboard tool shortcut switching
+- grid snapping and viewport calculations
+
+### Legacy Playwright suite
+
+The previous Playwright suite is archived for reference at:
+
+- `tests-legacy/playwright/student-flow.spec.ts`
+
+It is not part of CI. A helper script is kept for discoverability:
+
+```bash
+npm run test:legacy:e2e
+```
 
 ## CI/CD: GitHub Pages
 
@@ -124,7 +153,7 @@ What it does:
 1. On every push to `main` and every pull request:
 - Installs dependencies
 - Builds the app
-- Runs Playwright E2E tests
+- Runs Vitest test suite (`npm test`)
 2. On pushes to `main` only:
 - Builds with the correct GitHub Pages base path
 - Publishes `dist/` to GitHub Pages

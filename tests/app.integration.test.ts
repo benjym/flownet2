@@ -10,6 +10,7 @@ type AppTestApi = {
     domain: { width: number; height: number };
     view: { textbookScaleBar: boolean; hideEpValues: boolean };
     modifiers: { alt: boolean; ctrl: boolean; meta: boolean };
+    standpipePoint: { x: number; y: number } | null;
   };
   setTool: (tool: 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'void' | 'soil' | 'standpipe') => void;
   updateCanvasCursor: (point?: { x: number; y: number } | null) => void;
@@ -144,5 +145,33 @@ describe('Flow Nets app integration', () => {
     expect(view.top).toBeGreaterThanOrEqual(0);
     expect(view.width).toBeGreaterThan(100);
     expect(view.height).toBeGreaterThan(100);
+  });
+
+  it('updates active tool using keyboard shortcut keys', async () => {
+    await loadApp();
+    const epButton = document.querySelector('#toolRow button[data-tool="equipotential"]') as HTMLButtonElement;
+    const selectButton = document.querySelector('#toolRow button[data-tool="select"]') as HTMLButtonElement;
+
+    fireEvent.keyDown(window, { key: 'e', code: 'KeyE', altKey: false, ctrlKey: false, metaKey: false });
+    expect(epButton.classList.contains('is-active')).toBe(true);
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', altKey: false, ctrlKey: false, metaKey: false });
+    expect(selectButton.classList.contains('is-active')).toBe(true);
+  });
+
+  it('second standpipe tool click clears existing standpipe point', async () => {
+    const app = await loadApp();
+    const canvas = document.getElementById('flowCanvas') as HTMLCanvasElement;
+    const standpipeBtn = document.querySelector('#toolRow button[data-tool="standpipe"]') as HTMLButtonElement;
+    const standpipeText = document.getElementById('standpipeText') as HTMLParagraphElement;
+
+    app.__test.setTool('standpipe');
+    fireEvent.pointerDown(canvas, { ...canvasPoint(0.52, 0.45), button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(canvas, { ...canvasPoint(0.52, 0.45), button: 0, pointerId: 1, pointerType: 'mouse' });
+
+    fireEvent.click(standpipeBtn);
+
+    expect(app.__test.getState().standpipePoint).toBeNull();
+    expect(standpipeText.textContent).toContain('Choose the standpipe tool');
   });
 });

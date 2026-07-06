@@ -1,3 +1,11 @@
+import {
+  clamp as clampMath,
+  distance as distanceMath,
+  pointInPolygon as pointInPolygonMath,
+  projectPointToSegment as projectPointToSegmentMath,
+  snapPointToGridNode as snapPointToGridNodeMath,
+} from './math';
+
 type Tool = 'select' | 'equipotential' | 'phreatic' | 'noflow-line' | 'noflow-zone' | 'void' | 'soil' | 'standpipe';
 type LineKind = 'equipotential' | 'phreatic' | 'noflow';
 type CoordinateMode = 'real' | 'transformed';
@@ -356,6 +364,16 @@ export const __test = {
   syncModifierState,
   snapPointToGridNode,
   getViewport,
+  solveAndRender,
+  deleteSelected,
+  reorderBoundaryZOrder,
+  loadExampleById,
+  setZoom,
+  buildPersistedStateSnapshot,
+  applyPersistedStateFromRaw: (raw: unknown, fileName: string) => {
+    const parsed = parsePersistedState(raw);
+    applyPersistedState(parsed, fileName);
+  },
   waitForInitialization: async () => {
     await initializePromise;
   },
@@ -2011,18 +2029,12 @@ function clampPoint(point: Point): Point {
 }
 
 function snapPointToGridNode(point: Point): Point {
-  const nx = Math.max(2, state.solver.nx);
-  const ny = Math.max(2, state.solver.ny);
-  const dx = state.domain.width / (nx - 1);
-  const dy = state.domain.height / (ny - 1);
-
-  const i = clamp(Math.round(point.x / dx), 0, nx - 1);
-  const j = clamp(Math.round(point.y / dy), 0, ny - 1);
-
-  return {
-    x: i * dx,
-    y: j * dy,
-  };
+  return snapPointToGridNodeMath(point, {
+    width: state.domain.width,
+    height: state.domain.height,
+    nx: state.solver.nx,
+    ny: state.solver.ny,
+  });
 }
 
 function polygonBoundsFromVertices(vertices: Point[]): { minX: number; maxX: number; minY: number; maxY: number } {
@@ -4290,8 +4302,19 @@ function exportCanvasPng(): void {
 }
 
 function exportStateJson(): void {
+  const snapshot = buildPersistedStateSnapshot();
+
+  const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.download = `flownet-state-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  link.href = URL.createObjectURL(blob);
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function buildPersistedStateSnapshot(): PersistedFlowNetStateV1 {
   syncBoundaryOrder();
-  const snapshot: PersistedFlowNetStateV1 = {
+  return {
     schema: 'flownet2-state',
     version: 1,
     savedAt: new Date().toISOString(),
@@ -4315,13 +4338,6 @@ function exportStateJson(): void {
     boundaryOrder: state.boundaryOrder.map((item) => ({ kind: item.kind, id: item.id })),
     standpipePoint: state.standpipePoint ? { ...state.standpipePoint } : null,
   };
-
-  const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.download = `flownet-state-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-  link.href = URL.createObjectURL(blob);
-  link.click();
-  URL.revokeObjectURL(link.href);
 }
 
 async function importStateFromFile(file: File): Promise<void> {
@@ -4619,16 +4635,7 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
 }
 
 function projectPointToSegment(point: Point, a: Point, b: Point): Point {
-  const ab = { x: b.x - a.x, y: b.y - a.y };
-  const lenSq = ab.x * ab.x + ab.y * ab.y;
-  if (lenSq <= 1e-12) {
-    return { ...a };
-  }
-  const t = clamp(((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / lenSq, 0, 1);
-  return {
-    x: a.x + t * ab.x,
-    y: a.y + t * ab.y,
-  };
+  return projectPointToSegmentMath(point, a, b);
 }
 
 function distancePointToSegment(point: Point, a: Point, b: Point): number {
@@ -4726,21 +4733,7 @@ function buildModifierCursor(kind: 'plus' | 'minus'): string {
 }
 
 function pointInPolygon(point: Point, vertices: Point[]): boolean {
-  if (vertices.length < 3) {
-    return false;
-  }
-  let inside = false;
-  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i, i += 1) {
-    const vi = vertices[i];
-    const vj = vertices[j];
-    const intersect =
-      (vi.y > point.y) !== (vj.y > point.y) &&
-      point.x < ((vj.x - vi.x) * (point.y - vi.y)) / (vj.y - vi.y + 1e-12) + vi.x;
-    if (intersect) {
-      inside = !inside;
-    }
-  }
-  return inside;
+  return pointInPolygonMath(point, vertices);
 }
 
 function distancePointToPolygonEdges(point: Point, vertices: Point[]): number {
@@ -4893,9 +4886,9 @@ function normalize(vector: Point): Point {
 }
 
 function distance(a: Point, b: Point): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+  return distanceMath(a, b);
 }
 
 function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  return clampMath(value, min, max);
 }
