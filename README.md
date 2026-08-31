@@ -8,6 +8,7 @@ Students can:
 - Solve and visualize equipotential lines + flow lines
 - Place a standpipe to read hydraulic head and rise
 - Export a PNG of the current canvas
+- Generate a reproducible allocated assessment scenario from a 9-digit student number
 
 ## Tech Stack
 
@@ -57,6 +58,23 @@ npm run build
 6. Click **Download PNG** to save the visualization.
 7. Use **Save state** to export your current model as JSON.
 8. Use **Load file** (or drag/drop a JSON file onto the page) to restore a saved model.
+
+## Allocated Assessment Scenarios
+
+The **Allocated Scenario** panel accepts a 9-digit student number and deterministically selects a
+pre-tested combination of domain dimensions, boundary heads, structure location, maximum cutoff
+depth, anisotropy ratio, observation points, and numerical-sensitivity task.
+
+The generated model starts with:
+
+- Two fixed-head side boundaries
+- A common impermeable structure occupying the upper central part of the domain
+- Isotropic material settings for the baseline investigation
+- The standpipe placed at observation point P1
+
+The student number is cleared immediately after generation and is never included in PNG or JSON
+exports. Saved state files retain only the allocation code and scenario parameters, so allocated cases
+can be reopened and checked without retaining the identifying input.
 
 When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display to toggle between:
 - `Real (x, y)`

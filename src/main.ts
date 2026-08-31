@@ -71,6 +71,26 @@ interface StandpipeReading {
   rise: number;
 }
 
+type NumericalStudy = 'grid-resolution' | 'convergence-tolerance';
+
+interface AllocatedObservationPoint {
+  label: string;
+  point: Point;
+}
+
+interface AllocatedScenario {
+  allocationCode: string;
+  width: number;
+  height: number;
+  upstreamHead: number;
+  downstreamHead: number;
+  structureCentre: number;
+  maximumCutoffDepth: number;
+  anisotropyRatio: number;
+  numericalStudy: NumericalStudy;
+  observationPoints: AllocatedObservationPoint[];
+}
+
 interface PresetLine {
   kind: LineKind;
   vertices: Point[];
@@ -105,6 +125,7 @@ interface PersistedFlowNetStateV1 {
   lineBoundaries: LineBoundary[];
   polygons: NoFlowPolygon[];
   standpipePoint: Point | null;
+  allocation?: AllocatedScenario | null;
 }
 
 type Selected = { kind: 'line'; id: number } | { kind: 'polygon'; id: number } | null;
@@ -174,6 +195,7 @@ const marchingCases: Array<Array<[number, number]>> = [
 ];
 
 const DEFAULT_EXAMPLE_ID = 'uniform-ep';
+const ALLOCATED_EXAMPLE_ID = '__allocated__';
 
 let examplePresets: ExamplePreset[] = [];
 
@@ -222,6 +244,13 @@ const zoomLabel = byId<HTMLSpanElement>('zoomLabel');
 const cursorReadout = byId<HTMLSpanElement>('cursorReadout');
 const exampleSelect = byId<HTMLSelectElement>('exampleSelect');
 const exampleSummary = byId<HTMLParagraphElement>('exampleSummary');
+const studentNumberInput = byId<HTMLInputElement>('studentNumber');
+const generateScenarioBtn = byId<HTMLButtonElement>('generateScenarioBtn');
+const scenarioError = byId<HTMLParagraphElement>('scenarioError');
+const scenarioSummary = byId<HTMLDivElement>('scenarioSummary');
+const allocationCode = byId<HTMLParagraphElement>('allocationCode');
+const allocationDetails = byId<HTMLDListElement>('allocationDetails');
+const allocationObservationPoints = byId<HTMLUListElement>('allocationObservationPoints');
 
 const toolButtons = Array.from(toolRow.querySelectorAll<HTMLButtonElement>('button[data-tool]'));
 
@@ -281,6 +310,7 @@ const state = {
     meta: false,
   },
   solution: null as Solution | null,
+  allocation: null as AllocatedScenario | null,
 };
 
 let solveTimer: number | null = null;
@@ -406,6 +436,13 @@ async function loadExamplePresets(): Promise<ExamplePreset[]> {
 
 function initExamplePicker(): void {
   exampleSelect.innerHTML = '';
+
+  const allocatedOption = document.createElement('option');
+  allocatedOption.value = ALLOCATED_EXAMPLE_ID;
+  allocatedOption.textContent = 'Allocated assessment scenario';
+  allocatedOption.disabled = true;
+  exampleSelect.appendChild(allocatedOption);
+
   examplePresets.forEach((preset) => {
     const option = document.createElement('option');
     option.value = preset.id;
@@ -414,6 +451,9 @@ function initExamplePicker(): void {
   });
 
   exampleSelect.addEventListener('change', () => {
+    if (exampleSelect.value === ALLOCATED_EXAMPLE_ID) {
+      return;
+    }
     loadExampleById(exampleSelect.value);
   });
 
@@ -454,6 +494,7 @@ function loadExampleById(
   state.standpipePoint = preset.standpipePoint ? { ...preset.standpipePoint } : null;
   state.standpipeReading = null;
   state.solution = null;
+  state.allocation = null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.camera.panMode = false;
@@ -491,6 +532,7 @@ function loadExampleById(
 
   setTool('select');
   updateSelectionPanel();
+  updateAllocationSummary();
   updateExampleSummary();
 
   if (options?.updateUrl !== false) {
@@ -509,12 +551,247 @@ function setExampleInUrl(presetId: string): void {
 }
 
 function updateExampleSummary(): void {
+  if (state.allocation && exampleSelect.value === ALLOCATED_EXAMPLE_ID) {
+    exampleSummary.textContent = 'Your allocated assessment geometry and boundary heads are loaded.';
+    return;
+  }
   const preset = examplePresets.find((item) => item.id === exampleSelect.value);
   if (!preset) {
     exampleSummary.textContent = '';
     return;
   }
   exampleSummary.textContent = preset.summary;
+}
+
+function generateAndLoadAllocatedScenario(): void {
+  try {
+    const allocation = generateAllocatedScenario(studentNumberInput.value);
+    loadAllocatedScenario(allocation);
+    studentNumberInput.value = '';
+    clearScenarioError();
+  } catch (error) {
+    scenarioError.textContent = error instanceof Error ? error.message : 'Unable to generate scenario.';
+    scenarioError.classList.remove('is-hidden');
+    studentNumberInput.focus();
+  }
+}
+
+function generateAllocatedScenario(studentNumber: string): AllocatedScenario {
+  if (!/^\d{9}$/.test(studentNumber)) {
+    throw new Error('Enter your complete 9-digit student number.');
+  }
+
+  let seed = 2166136261;
+  for (const character of studentNumber) {
+    seed ^= character.charCodeAt(0);
+    seed = Math.imul(seed, 16777619);
+  }
+  seed >>>= 0;
+
+  const random = (): number => {
+    seed = (seed + 0x6d2b79f5) >>> 0;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const select = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)];
+
+  const width = select([30, 36, 42] as const);
+  const height = select([12, 14, 16] as const);
+  const downstreamHead = select([1, 2, 3] as const);
+  const headDifference = select([8, 10, 12] as const);
+  const centreFraction = select([0.45, 0.5, 0.55] as const);
+  const cutoffFraction = select([0.35, 0.45, 0.55] as const);
+  const anisotropyRatio = select([0.25, 0.5, 2, 4] as const);
+  const numericalStudy = select(['grid-resolution', 'convergence-tolerance'] as const);
+  const upstreamHead = downstreamHead + headDifference;
+  const structureCentre = roundScenarioCoordinate(width * centreFraction);
+  const maximumCutoffDepth = roundScenarioCoordinate(height * cutoffFraction);
+
+  const observationPoints: AllocatedObservationPoint[] = [
+    { label: 'P1', point: { x: structureCentre - 0.15 * width, y: 0.2 * height } },
+    { label: 'P2', point: { x: structureCentre - 0.05 * width, y: 0.2 * height } },
+    { label: 'P3', point: { x: structureCentre + 0.05 * width, y: 0.2 * height } },
+    { label: 'P4', point: { x: structureCentre + 0.15 * width, y: 0.2 * height } },
+    { label: 'P5', point: { x: structureCentre + 0.25 * width, y: 0.1 * height } },
+  ].map((observation) => ({
+    ...observation,
+    point: {
+      x: roundScenarioCoordinate(observation.point.x),
+      y: roundScenarioCoordinate(observation.point.y),
+    },
+  }));
+
+  const anisotropyCode = String(anisotropyRatio).replace('.', 'p');
+  const studyCode = numericalStudy === 'grid-resolution' ? 'G' : 'T';
+  const allocationCode = [
+    `FN-W${width}`,
+    `H${height}`,
+    `U${upstreamHead}`,
+    `D${downstreamHead}`,
+    `C${Math.round(centreFraction * 100)}`,
+    `M${Math.round(cutoffFraction * 100)}`,
+    `A${anisotropyCode}`,
+    studyCode,
+  ].join('-');
+
+  return {
+    allocationCode,
+    width,
+    height,
+    upstreamHead,
+    downstreamHead,
+    structureCentre,
+    maximumCutoffDepth,
+    anisotropyRatio,
+    numericalStudy,
+    observationPoints,
+  };
+}
+
+function roundScenarioCoordinate(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function loadAllocatedScenario(allocation: AllocatedScenario): void {
+  state.domain = { width: allocation.width, height: allocation.height };
+  state.solver = {
+    nx: 81,
+    ny: 41,
+    kx: 1,
+    ky: 1,
+    maxIter: 6000,
+    tolerance: 1e-4,
+    omega: 1.6,
+  };
+  state.view = {
+    contours: 14,
+    streamlines: 12,
+    autoSolve: true,
+    coordinateMode: 'real',
+    showHeadMap: false,
+  };
+  state.pendingLineStart = null;
+  state.previewPoint = null;
+  state.selected = null;
+  state.drag = { type: 'none' };
+  state.solution = null;
+  state.standpipeReading = null;
+  state.standpipePoint = { ...allocation.observationPoints[0].point };
+  state.camera.zoom = 1;
+  state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
+  state.camera.panMode = false;
+  state.lineBoundaries = [];
+  state.polygons = [];
+  state.nextId = 1;
+  state.allocation = cloneAllocatedScenario(allocation);
+
+  addBoundaryFromVertices(
+    'equipotential',
+    [{ x: 0, y: 0 }, { x: 0, y: allocation.height }],
+    allocation.upstreamHead,
+  );
+  addBoundaryFromVertices(
+    'equipotential',
+    [{ x: allocation.width, y: 0 }, { x: allocation.width, y: allocation.height }],
+    allocation.downstreamHead,
+  );
+
+  const structureHalfWidth = 0.15 * allocation.width;
+  const structureUnderside = 0.75 * allocation.height;
+  state.polygons.push({
+    id: state.nextId++,
+    vertices: [
+      { x: allocation.structureCentre - structureHalfWidth, y: structureUnderside },
+      { x: allocation.structureCentre + structureHalfWidth, y: structureUnderside },
+      { x: allocation.structureCentre + structureHalfWidth, y: allocation.height },
+      { x: allocation.structureCentre - structureHalfWidth, y: allocation.height },
+    ],
+  });
+
+  domainWidthInput.value = String(state.domain.width);
+  domainHeightInput.value = String(state.domain.height);
+  gridNxInput.value = String(state.solver.nx);
+  gridNyInput.value = String(state.solver.ny);
+  kxInput.value = String(state.solver.kx);
+  kyInput.value = String(state.solver.ky);
+  maxIterInput.value = String(state.solver.maxIter);
+  toleranceInput.value = String(state.solver.tolerance);
+  omegaInput.value = String(state.solver.omega);
+  contoursInput.value = String(state.view.contours);
+  streamlinesInput.value = String(state.view.streamlines);
+  coordModeSelect.value = state.view.coordinateMode;
+  showHeadMapInput.checked = state.view.showHeadMap;
+  autoSolveInput.checked = state.view.autoSolve;
+  newHeadInput.value = String(allocation.upstreamHead);
+  exampleSelect.value = ALLOCATED_EXAMPLE_ID;
+
+  clearExampleInUrl();
+  setTool('select');
+  updateSelectionPanel();
+  updateAllocationSummary();
+  updateExampleSummary();
+  solveAndRender();
+}
+
+function cloneAllocatedScenario(allocation: AllocatedScenario): AllocatedScenario {
+  return {
+    ...allocation,
+    observationPoints: allocation.observationPoints.map((observation) => ({
+      label: observation.label,
+      point: { ...observation.point },
+    })),
+  };
+}
+
+function updateAllocationSummary(): void {
+  const allocation = state.allocation;
+  if (!allocation) {
+    scenarioSummary.classList.add('is-hidden');
+    allocationCode.textContent = '';
+    allocationDetails.replaceChildren();
+    allocationObservationPoints.replaceChildren();
+    return;
+  }
+
+  scenarioSummary.classList.remove('is-hidden');
+  allocationCode.textContent = `Allocation: ${allocation.allocationCode}`;
+  allocationDetails.replaceChildren();
+
+  const details: Array<[string, string]> = [
+    ['Domain', `${allocation.width} m x ${allocation.height} m`],
+    ['Boundary heads', `${allocation.upstreamHead} m upstream; ${allocation.downstreamHead} m downstream`],
+    ['Structure centre', `x = ${formatScenarioNumber(allocation.structureCentre)} m`],
+    ['Maximum cutoff depth', `${formatScenarioNumber(allocation.maximumCutoffDepth)} m`],
+    ['Part C Kx/Ky', formatScenarioNumber(allocation.anisotropyRatio)],
+    ['Numerical study', allocation.numericalStudy === 'grid-resolution' ? 'Grid resolution' : 'Convergence tolerance'],
+  ];
+
+  details.forEach(([term, description]) => {
+    const dt = document.createElement('dt');
+    dt.textContent = term;
+    const dd = document.createElement('dd');
+    dd.textContent = description;
+    allocationDetails.append(dt, dd);
+  });
+
+  allocationObservationPoints.replaceChildren();
+  allocation.observationPoints.forEach((observation) => {
+    const item = document.createElement('li');
+    item.textContent = `${observation.label}: (${formatScenarioNumber(observation.point.x)}, ${formatScenarioNumber(observation.point.y)}) m`;
+    allocationObservationPoints.appendChild(item);
+  });
+}
+
+function formatScenarioNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function clearScenarioError(): void {
+  scenarioError.textContent = '';
+  scenarioError.classList.add('is-hidden');
 }
 
 function wireControls(): void {
@@ -537,6 +814,22 @@ function wireControls(): void {
       readInputsIntoState();
       scheduleSolve();
     });
+  });
+
+  studentNumberInput.addEventListener('input', () => {
+    studentNumberInput.value = studentNumberInput.value.replace(/\D/g, '').slice(0, 9);
+    clearScenarioError();
+  });
+
+  studentNumberInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      generateAndLoadAllocatedScenario();
+    }
+  });
+
+  generateScenarioBtn.addEventListener('click', () => {
+    generateAndLoadAllocatedScenario();
   });
 
   autoSolveInput.addEventListener('change', () => {
@@ -3108,7 +3401,8 @@ function headColor(head: number, minHead: number, maxHead: number): string {
 
 function exportCanvasPng(): void {
   const link = document.createElement('a');
-  link.download = `flownet-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+  const allocationPrefix = state.allocation ? `${state.allocation.allocationCode}-` : '';
+  link.download = `flownet-${allocationPrefix}${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
 }
@@ -3133,11 +3427,13 @@ function exportStateJson(): void {
       vertices: polygon.vertices.map((vertex) => ({ ...vertex })),
     })),
     standpipePoint: state.standpipePoint ? { ...state.standpipePoint } : null,
+    allocation: state.allocation ? cloneAllocatedScenario(state.allocation) : null,
   };
 
   const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: 'application/json' });
   const link = document.createElement('a');
-  link.download = `flownet-state-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  const allocationPrefix = state.allocation ? `${state.allocation.allocationCode}-` : '';
+  link.download = `flownet-state-${allocationPrefix}${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   link.href = URL.createObjectURL(blob);
   link.click();
   URL.revokeObjectURL(link.href);
@@ -3199,6 +3495,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
   const lineBoundaries = readLineBoundaries(root.lineBoundaries);
   const polygons = readPolygons(root.polygons);
   const standpipePoint = readOptionalPoint(root.standpipePoint, 'standpipePoint');
+  const allocation = readOptionalAllocatedScenario(root.allocation);
 
   return {
     schema: 'flownet2-state',
@@ -3211,6 +3508,7 @@ function parsePersistedState(raw: unknown): PersistedFlowNetStateV1 {
     lineBoundaries,
     polygons,
     standpipePoint,
+    allocation,
   };
 }
 
@@ -3225,6 +3523,7 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.solution = null;
   state.standpipeReading = null;
   state.standpipePoint = imported.standpipePoint ? clampPoint(imported.standpipePoint) : null;
+  state.allocation = imported.allocation ? cloneAllocatedScenario(imported.allocation) : null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.camera.panMode = false;
@@ -3261,11 +3560,61 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   newHeadInput.value = String(imported.newHead);
 
   clearExampleInUrl();
-  exampleSummary.textContent = `Loaded from file: ${fileName}`;
+  if (state.allocation) {
+    exampleSelect.value = ALLOCATED_EXAMPLE_ID;
+  }
+  updateAllocationSummary();
+  exampleSummary.textContent = state.allocation
+    ? `Loaded allocated scenario from file: ${fileName}`
+    : `Loaded from file: ${fileName}`;
 
   setTool('select');
   updateSelectionPanel();
   solveAndRender();
+}
+
+function readOptionalAllocatedScenario(value: unknown): AllocatedScenario | null {
+  if (value === null || typeof value === 'undefined') {
+    return null;
+  }
+
+  const record = asRecord(value, 'allocation');
+  if (typeof record.allocationCode !== 'string' || !/^FN-[A-Z0-9p.-]+$/.test(record.allocationCode)) {
+    throw new Error('allocation.allocationCode is invalid.');
+  }
+
+  const numericalStudyRaw = record.numericalStudy;
+  if (numericalStudyRaw !== 'grid-resolution' && numericalStudyRaw !== 'convergence-tolerance') {
+    throw new Error('allocation.numericalStudy is invalid.');
+  }
+
+  if (!Array.isArray(record.observationPoints) || record.observationPoints.length !== 5) {
+    throw new Error('allocation.observationPoints must contain 5 points.');
+  }
+
+  const observationPoints = record.observationPoints.map((entry, index) => {
+    const observation = asRecord(entry, `allocation.observationPoints[${index}]`);
+    if (typeof observation.label !== 'string' || !/^P[1-5]$/.test(observation.label)) {
+      throw new Error(`allocation.observationPoints[${index}].label is invalid.`);
+    }
+    return {
+      label: observation.label,
+      point: readPoint(observation.point, `allocation.observationPoints[${index}].point`),
+    };
+  });
+
+  return {
+    allocationCode: record.allocationCode,
+    width: readNumberValue(record.width, 'allocation.width', 5, 120),
+    height: readNumberValue(record.height, 'allocation.height', 3, 60),
+    upstreamHead: readNumberValue(record.upstreamHead, 'allocation.upstreamHead', -200, 200),
+    downstreamHead: readNumberValue(record.downstreamHead, 'allocation.downstreamHead', -200, 200),
+    structureCentre: readNumberValue(record.structureCentre, 'allocation.structureCentre', 0, 120),
+    maximumCutoffDepth: readNumberValue(record.maximumCutoffDepth, 'allocation.maximumCutoffDepth', 0, 60),
+    anisotropyRatio: readNumberValue(record.anisotropyRatio, 'allocation.anisotropyRatio', 0.01, 1000),
+    numericalStudy: numericalStudyRaw,
+    observationPoints,
+  };
 }
 
 function clearExampleInUrl(): void {

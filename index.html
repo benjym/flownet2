@@ -39,6 +39,37 @@
           <p id="exampleSummary" class="hint"></p>
         </section>
 
+        <section class="group" aria-labelledby="allocatedScenarioHeading">
+          <h2 id="allocatedScenarioHeading">Allocated Scenario</h2>
+          <p class="hint">
+            Enter your 9-digit student number to load your assessment case. It is used locally to generate the case,
+            then discarded; it is not saved in the model file.
+          </p>
+          <div class="scenario-generator-row">
+            <label>Student number
+              <input
+                id="studentNumber"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]{9}"
+                maxlength="9"
+                autocomplete="off"
+                placeholder="9 digits"
+                aria-describedby="scenarioPrivacy"
+              >
+            </label>
+            <button id="generateScenarioBtn" type="button">Generate scenario</button>
+          </div>
+          <p id="scenarioPrivacy" class="hint">Use the allocation exactly as displayed in your assessment report.</p>
+          <p id="scenarioError" class="status scenario-error is-hidden" role="alert"></p>
+          <div id="scenarioSummary" class="scenario-card is-hidden" aria-live="polite">
+            <p id="allocationCode" class="allocation-code"></p>
+            <dl id="allocationDetails" class="allocation-details"></dl>
+            <p class="scenario-subheading"><strong>Observation points</strong></p>
+            <ul id="allocationObservationPoints" class="observation-points"></ul>
+          </div>
+        </section>
+
         <section class="group">
           <h2>Domain + Material</h2>
           <div class="grid two-col">

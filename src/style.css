@@ -198,6 +198,68 @@ button.danger {
   color: #27475b;
 }
 
+.scenario-generator-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: end;
+  margin-top: 0.55rem;
+}
+
+.scenario-generator-row button {
+  min-height: 2.15rem;
+}
+
+.scenario-error {
+  border-color: #e1b6b6;
+  background: #fff1f1;
+  color: var(--danger);
+}
+
+.scenario-card {
+  margin-top: 0.55rem;
+  padding: 0.6rem;
+  border: 1px solid #9fc9c3;
+  border-radius: 9px;
+  background: #edf9f7;
+  font-size: 0.79rem;
+}
+
+.allocation-code {
+  margin: 0 0 0.45rem;
+  color: #07534d;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.allocation-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.22rem 0.55rem;
+  margin: 0;
+}
+
+.allocation-details dt {
+  color: #3b5964;
+}
+
+.allocation-details dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.scenario-subheading {
+  margin: 0.55rem 0 0.2rem;
+}
+
+.observation-points {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.15rem 0.65rem;
+  margin: 0;
+  padding-left: 1rem;
+}
+
 .step-hint {
   margin-top: 0.35rem;
   color: #0a4f50;

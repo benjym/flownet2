@@ -628,4 +628,74 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#exampleSummary')).toContainText('Loaded from file');
     await expect(page.locator('#statusText')).toContainText('Solved');
   });
+
+  test('allocated scenario validates a complete nine-digit student number', async ({ page }) => {
+    await page.goto('/');
+
+    await page.locator('#studentNumber').fill('12345');
+    await page.getByRole('button', { name: 'Generate scenario' }).click();
+
+    await expect(page.locator('#scenarioError')).toContainText('complete 9-digit student number');
+    await expect(page.locator('#scenarioSummary')).toHaveClass(/is-hidden/);
+  });
+
+  test('student number deterministically loads an allocated assessment scenario', async ({ page }) => {
+    await page.goto('/');
+
+    await page.locator('#studentNumber').fill('123456789');
+    await page.getByRole('button', { name: 'Generate scenario' }).click();
+
+    const firstCode = (await page.locator('#allocationCode').innerText()).trim();
+    const firstDetails = (await page.locator('#allocationDetails').innerText()).trim();
+    expect(firstCode).toMatch(/^Allocation: FN-/);
+    await expect(page.locator('#studentNumber')).toHaveValue('');
+    await expect(page.locator('#exampleSelect')).toHaveValue('__allocated__');
+    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 1 no-flow polygons');
+    await expect(page.locator('#allocationObservationPoints li')).toHaveCount(5);
+    await expect(page.locator('#kx')).toHaveValue('1');
+    await expect(page.locator('#ky')).toHaveValue('1');
+    await expect(page.locator('#statusText')).toContainText('Solved');
+    await expect(page.locator('#standpipeText')).toContainText('Point');
+
+    await page.selectOption('#exampleSelect', 'uniform-ep');
+    await expect(page.locator('#scenarioSummary')).toHaveClass(/is-hidden/);
+
+    await page.locator('#studentNumber').fill('123456789');
+    await page.getByRole('button', { name: 'Generate scenario' }).click();
+    await expect(page.locator('#allocationCode')).toHaveText(firstCode);
+    expect((await page.locator('#allocationDetails').innerText()).trim()).toBe(firstDetails);
+  });
+
+  test('saved allocated scenario contains allocation metadata but no student number', async ({ page }) => {
+    await page.goto('/');
+
+    await page.locator('#studentNumber').fill('987654321');
+    await page.getByRole('button', { name: 'Generate scenario' }).click();
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    expect(download.suggestedFilename()).toMatch(/^flownet-state-FN-/);
+    if (!downloadPath) {
+      throw new Error('Allocated-state download path was null');
+    }
+
+    const rawState = fs.readFileSync(downloadPath, 'utf8');
+    const savedState = JSON.parse(rawState);
+    expect(rawState).not.toContain('987654321');
+    expect(page.url()).not.toContain('987654321');
+    expect(savedState.allocation.allocationCode).toMatch(/^FN-/);
+    expect(savedState.allocation.observationPoints).toHaveLength(5);
+    expect(savedState.lineBoundaries).toHaveLength(2);
+    expect(savedState.polygons).toHaveLength(1);
+
+    await page.selectOption('#exampleSelect', 'uniform-ep');
+    await expect(page.locator('#scenarioSummary')).toHaveClass(/is-hidden/);
+    await page.setInputFiles('#loadStateInput', downloadPath);
+    await expect(page.locator('#allocationCode')).toContainText(savedState.allocation.allocationCode);
+    await expect(page.locator('#allocationObservationPoints li')).toHaveCount(5);
+    await expect(page.locator('#exampleSummary')).toContainText('Loaded allocated scenario from file');
+  });
 });
