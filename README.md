@@ -76,8 +76,8 @@ pre-tested combination of domain dimensions, boundary heads, structure location,
 depth, anisotropy ratio, observation points, and numerical-sensitivity task. One number always
 produces the same linked pair:
 
-- **Case A — homogeneous baseline:** a rectangular isotropic domain with three observation points
-  for hand, analytical, and numerical comparison.
+- **Case A — homogeneous baseline:** a rectangular isotropic domain with three low-elevation
+  observation points for hand, analytical, and numerical comparison.
 - **Case B — hydraulic structure:** the same domain and boundary heads, with a surface-flush
   trapezoidal structure, five uplift/design observation points, and the allocated advanced-study
   parameters. Structure depth and left/right side slopes vary deterministically between students.

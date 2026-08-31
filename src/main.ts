@@ -736,9 +736,9 @@ function generateAllocatedScenarioPair(studentNumber: string): AllocatedScenario
   const maximumCutoffDepth = roundScenarioCoordinate(height * cutoffFraction);
 
   const baselineObservationPoints: AllocatedObservationPoint[] = [
-    { label: 'P1', point: { x: 0.2 * width, y: 0.5 * height } },
-    { label: 'P2', point: { x: 0.5 * width, y: 0.5 * height } },
-    { label: 'P3', point: { x: 0.8 * width, y: 0.5 * height } },
+    { label: 'P1', point: { x: 0.2 * width, y: 0.1 * height } },
+    { label: 'P2', point: { x: 0.5 * width, y: 0.1 * height } },
+    { label: 'P3', point: { x: 0.8 * width, y: 0.1 * height } },
   ].map((observation) => ({
     ...observation,
     point: {
@@ -1654,7 +1654,7 @@ function onPointerDown(event: PointerEvent): void {
   }
 
   if (state.tool === 'standpipe') {
-    state.standpipePoint = point;
+    state.standpipePoint = snapPointToGridNode(point);
     state.drag = { type: 'standpipe-move' };
     updateStandpipeReading();
     updateGuidanceUI();

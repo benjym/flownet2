@@ -194,6 +194,12 @@ describe('Flow Nets app integration', () => {
     fireEvent.pointerDown(canvas, { ...canvasPoint(0.52, 0.45), button: 0, pointerId: 1, pointerType: 'mouse' });
     fireEvent.pointerUp(canvas, { ...canvasPoint(0.52, 0.45), button: 0, pointerId: 1, pointerType: 'mouse' });
 
+    const state = app.__test.getState();
+    const dx = state.domain.width / (state.solver.nx - 1);
+    const dy = state.domain.height / (state.solver.ny - 1);
+    expect((state.standpipePoint?.x ?? 0) / dx).toBeCloseTo(Math.round((state.standpipePoint?.x ?? 0) / dx), 10);
+    expect((state.standpipePoint?.y ?? 0) / dy).toBeCloseTo(Math.round((state.standpipePoint?.y ?? 0) / dy), 10);
+
     fireEvent.click(standpipeBtn);
 
     expect(app.__test.getState().standpipePoint).toBeNull();
@@ -219,6 +225,15 @@ describe('Flow Nets app integration', () => {
     expect(state.allocation?.allocationCode).toBe('FN-W42-H12-U14-D2-C55-M35-A4-T-A');
     expect(state.allocation?.caseId).toBe('A');
     expect(state.allocation?.observationPoints).toHaveLength(3);
+    expect(state.allocation?.observationPoints.every(
+      ({ point }) => Math.abs(point.y - 0.1 * state.domain.height) < 1e-10,
+    )).toBe(true);
+    expect(state.allocation?.observationPoints.every(({ point }) => {
+      const head = (state.allocation?.upstreamHead ?? 0)
+        - (((state.allocation?.upstreamHead ?? 0) - (state.allocation?.downstreamHead ?? 0)) * point.x)
+          / state.domain.width;
+      return head > point.y;
+    })).toBe(true);
     expect(state.lineBoundaries).toHaveLength(2);
     expect(state.polygons).toHaveLength(0);
     expect(document.getElementById('allocationObservationPoints')?.children).toHaveLength(3);
@@ -287,5 +302,20 @@ describe('Flow Nets app integration', () => {
     expect(new Set(signatures).size).toBeGreaterThan(1);
     expect(app.__test.generateAllocatedScenarioPair('123456789').caseB)
       .toEqual(app.__test.generateAllocatedScenarioPair('123456789').caseB);
+  });
+
+  it('exposes correctly named numerical convergence controls', async () => {
+    await loadApp();
+    const gridNxLabel = document.getElementById('gridNx')?.closest('label');
+    const gridNyLabel = document.getElementById('gridNy')?.closest('label');
+    const maxIterLabel = document.getElementById('maxIter')?.closest('label');
+    const toleranceLabel = document.getElementById('tolerance')?.closest('label');
+
+    expect(gridNxLabel?.textContent).toContain('Grid nodes in X');
+    expect(gridNyLabel?.textContent).toContain('Grid nodes in Y');
+    expect(maxIterLabel?.classList.contains('is-hidden')).toBe(false);
+    expect(toleranceLabel?.classList.contains('is-hidden')).toBe(false);
+    expect(maxIterLabel?.textContent).toContain('Maximum iterations');
+    expect(toleranceLabel?.textContent).toContain('Convergence tolerance');
   });
 });
