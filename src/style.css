@@ -230,11 +230,27 @@ button.danger {
   font-size: 0.79rem;
 }
 
-.allocation-code {
-  margin: 0 0 0.45rem;
-  color: #07534d;
+.scenario-case-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.scenario-case-actions button {
+  min-height: 2.4rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.scenario-case-actions button[aria-pressed='true'] {
+  border-color: #087f78;
+  background: #cceee9;
+  color: #064f4a;
   font-weight: 700;
-  overflow-wrap: anywhere;
+}
+
+.scenario-case-actions + .allocation-details {
+  margin-top: 0.55rem;
 }
 
 .allocation-details {

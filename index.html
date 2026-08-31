@@ -40,10 +40,10 @@
         </section>
 
         <section class="group" aria-labelledby="allocatedScenarioHeading">
-          <h2 id="allocatedScenarioHeading">Allocated Scenario</h2>
+          <h2 id="allocatedScenarioHeading">Allocated Cases</h2>
           <p class="hint">
-            Enter your 9-digit student number to load your assessment case. It is used locally to generate the case,
-            then discarded; it is not saved in the model file.
+            Enter your 9-digit student number to generate your paired assessment cases. It is used locally,
+            then discarded; it is not saved in either model file.
           </p>
           <div class="scenario-generator-row">
             <label>Student number
@@ -58,12 +58,17 @@
                 aria-describedby="scenarioPrivacy"
               >
             </label>
-            <button id="generateScenarioBtn" type="button">Generate scenario</button>
+            <button id="generateScenarioBtn" type="button">Generate cases</button>
           </div>
-          <p id="scenarioPrivacy" class="hint">Use the allocation exactly as displayed in your assessment report.</p>
+          <p id="scenarioPrivacy" class="hint">
+            Save each case before switching: loading the other starting case replaces the current model.
+          </p>
           <p id="scenarioError" class="status scenario-error is-hidden" role="alert"></p>
           <div id="scenarioSummary" class="scenario-card is-hidden" aria-live="polite">
-            <p id="allocationCode" class="allocation-code"></p>
+            <div id="scenarioCaseActions" class="scenario-case-actions" aria-label="Allocated assessment cases">
+              <button id="loadScenarioACaseBtn" type="button">Load Case A: baseline</button>
+              <button id="loadScenarioBCaseBtn" type="button">Load Case B: structure</button>
+            </div>
             <dl id="allocationDetails" class="allocation-details"></dl>
             <p class="scenario-subheading"><strong>Observation points</strong></p>
             <ul id="allocationObservationPoints" class="observation-points"></ul>

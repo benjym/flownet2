@@ -13,7 +13,17 @@ type AppTestApi = {
     modifiers: { alt: boolean; ctrl: boolean; meta: boolean };
     standpipePoint: { x: number; y: number } | null;
     allocation: null | {
+      pairCode: string;
+      caseId: 'A' | 'B';
       allocationCode: string;
+      width: number;
+      height: number;
+      upstreamHead: number;
+      downstreamHead: number;
+      structureTopHalfWidth: number;
+      structureUnderside: number;
+      leftSideInset: number;
+      rightSideInset: number;
       observationPoints: Array<{ label: string; point: { x: number; y: number } }>;
     };
   };
@@ -23,6 +33,13 @@ type AppTestApi = {
   snapPointToGridNode: (point: { x: number; y: number }) => { x: number; y: number };
   getViewport: () => { left: number; top: number; width: number; height: number };
   loadExampleById: (presetId: string) => void;
+  generateAllocatedScenarioPair: (studentNumber: string) => {
+    caseB: {
+      structureUnderside: number;
+      leftSideInset: number;
+      rightSideInset: number;
+    };
+  };
   buildPersistedStateSnapshot: () => unknown;
   applyPersistedStateFromRaw: (raw: unknown, fileName: string) => void;
   waitForInitialization: () => Promise<void>;
@@ -183,7 +200,7 @@ describe('Flow Nets app integration', () => {
     expect(standpipeText.textContent).toContain('Choose the standpipe tool');
   });
 
-  it('validates and deterministically loads an allocated assessment scenario', async () => {
+  it('validates and deterministically loads paired allocated assessment cases', async () => {
     const app = await loadApp();
     const studentNumber = document.getElementById('studentNumber') as HTMLInputElement;
     const generateButton = document.getElementById('generateScenarioBtn') as HTMLButtonElement;
@@ -198,12 +215,45 @@ describe('Flow Nets app integration', () => {
 
     const state = app.__test.getState();
     expect(studentNumber.value).toBe('');
-    expect(state.allocation?.allocationCode).toBe('FN-W42-H12-U14-D2-C55-M35-A4-T');
-    expect(state.allocation?.observationPoints).toHaveLength(5);
+    expect(state.allocation?.pairCode).toBe('FN-W42-H12-U14-D2-C55-M35-A4-T');
+    expect(state.allocation?.allocationCode).toBe('FN-W42-H12-U14-D2-C55-M35-A4-T-A');
+    expect(state.allocation?.caseId).toBe('A');
+    expect(state.allocation?.observationPoints).toHaveLength(3);
     expect(state.lineBoundaries).toHaveLength(2);
+    expect(state.polygons).toHaveLength(0);
+    expect(document.getElementById('allocationObservationPoints')?.children).toHaveLength(3);
+    expect(document.getElementById('loadScenarioACaseBtn')?.getAttribute('aria-pressed')).toBe('true');
+
+    const sharedParameters = {
+      width: state.allocation?.width,
+      height: state.allocation?.height,
+      upstreamHead: state.allocation?.upstreamHead,
+      downstreamHead: state.allocation?.downstreamHead,
+    };
+
+    fireEvent.click(document.getElementById('loadScenarioBCaseBtn') as HTMLButtonElement);
+
+    expect(state.allocation?.allocationCode).toBe('FN-W42-H12-U14-D2-C55-M35-A4-T-B');
+    expect(state.allocation?.caseId).toBe('B');
+    expect(state.allocation?.observationPoints).toHaveLength(5);
     expect(state.polygons).toHaveLength(1);
     expect(state.polygons[0].regionType).toBe('noflow');
+    const [bottomLeft, bottomRight, topRight, topLeft] = state.polygons[0].vertices;
+    expect(topLeft.y).toBe(state.domain.height);
+    expect(topRight.y).toBe(state.domain.height);
+    expect(bottomLeft.y).toBeLessThan(state.domain.height);
+    expect(bottomRight.y).toBe(bottomLeft.y);
+    expect(bottomLeft.x).toBeGreaterThan(topLeft.x);
+    expect(bottomRight.x).toBeLessThan(topRight.x);
     expect(document.getElementById('allocationObservationPoints')?.children).toHaveLength(5);
+    expect(document.getElementById('loadScenarioBCaseBtn')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('scenarioSummary')?.textContent).not.toContain('FN-');
+    expect({
+      width: state.allocation?.width,
+      height: state.allocation?.height,
+      upstreamHead: state.allocation?.upstreamHead,
+      downstreamHead: state.allocation?.downstreamHead,
+    }).toEqual(sharedParameters);
   });
 
   it('persists allocated metadata without retaining the student number', async () => {
@@ -224,5 +274,18 @@ describe('Flow Nets app integration', () => {
     app.__test.applyPersistedStateFromRaw(snapshot, 'allocated-state.json');
     expect(app.__test.getState().allocation).not.toBeNull();
     expect(document.getElementById('exampleSummary')?.textContent).toContain('Loaded allocated scenario');
+  });
+
+  it('allocates reproducible but varied trapezoid geometries', async () => {
+    const app = await loadApp();
+    const studentNumbers = ['111111111', '123456789', '555555555', '987654321'];
+    const signatures = studentNumbers.map((studentNumber) => {
+      const allocated = app.__test.generateAllocatedScenarioPair(studentNumber).caseB;
+      return `${allocated.structureUnderside}:${allocated.leftSideInset}:${allocated.rightSideInset}`;
+    });
+
+    expect(new Set(signatures).size).toBeGreaterThan(1);
+    expect(app.__test.generateAllocatedScenarioPair('123456789').caseB)
+      .toEqual(app.__test.generateAllocatedScenarioPair('123456789').caseB);
   });
 });

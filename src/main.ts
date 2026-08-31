@@ -85,6 +85,7 @@ interface StandpipeReading {
 }
 
 type NumericalStudy = 'grid-resolution' | 'convergence-tolerance';
+type AllocatedCaseId = 'A' | 'B';
 
 interface AllocatedObservationPoint {
   label: string;
@@ -92,16 +93,28 @@ interface AllocatedObservationPoint {
 }
 
 interface AllocatedScenario {
+  pairCode: string;
+  caseId: AllocatedCaseId;
   allocationCode: string;
   width: number;
   height: number;
   upstreamHead: number;
   downstreamHead: number;
   structureCentre: number;
+  structureTopHalfWidth: number;
+  structureUnderside: number;
+  leftSideInset: number;
+  rightSideInset: number;
   maximumCutoffDepth: number;
   anisotropyRatio: number;
   numericalStudy: NumericalStudy;
   observationPoints: AllocatedObservationPoint[];
+}
+
+interface AllocatedScenarioPair {
+  pairCode: string;
+  caseA: AllocatedScenario;
+  caseB: AllocatedScenario;
 }
 
 interface PresetLine {
@@ -281,9 +294,11 @@ const studentNumberInput = byId<HTMLInputElement>('studentNumber');
 const generateScenarioBtn = byId<HTMLButtonElement>('generateScenarioBtn');
 const scenarioError = byId<HTMLParagraphElement>('scenarioError');
 const scenarioSummary = byId<HTMLDivElement>('scenarioSummary');
-const allocationCode = byId<HTMLParagraphElement>('allocationCode');
 const allocationDetails = byId<HTMLDListElement>('allocationDetails');
 const allocationObservationPoints = byId<HTMLUListElement>('allocationObservationPoints');
+const scenarioCaseActions = byId<HTMLDivElement>('scenarioCaseActions');
+const loadScenarioACaseBtn = byId<HTMLButtonElement>('loadScenarioACaseBtn');
+const loadScenarioBCaseBtn = byId<HTMLButtonElement>('loadScenarioBCaseBtn');
 
 const toolButtons = Array.from(toolRow.querySelectorAll<HTMLButtonElement>('button[data-tool]'));
 
@@ -356,6 +371,7 @@ let guideReturnFocus: HTMLElement | null = null;
 let draggingInventoryItem: BoundaryRef | null = null;
 let lineInventoryDropTarget: LineInventoryDropTarget | null = null;
 let initializePromise: Promise<void> | null = null;
+let allocatedScenarioPair: AllocatedScenarioPair | null = null;
 const CURSOR_PLUS = buildModifierCursor('plus');
 const CURSOR_MINUS = buildModifierCursor('minus');
 const RENDER_STYLE = readRenderStyleTokens();
@@ -398,6 +414,7 @@ export const __test = {
   deleteSelected,
   reorderBoundaryZOrder,
   loadExampleById,
+  generateAllocatedScenarioPair,
   setZoom,
   buildPersistedStateSnapshot,
   applyPersistedStateFromRaw: (raw: unknown, fileName: string) => {
@@ -578,6 +595,7 @@ function loadExampleById(
   state.standpipeReading = null;
   state.solution = null;
   state.allocation = null;
+  allocatedScenarioPair = null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
   state.lineBoundaries = [];
@@ -641,7 +659,9 @@ function setExampleInUrl(presetId: string): void {
 
 function updateExampleSummary(): void {
   if (state.allocation && exampleSelect.value === ALLOCATED_EXAMPLE_ID) {
-    exampleSummary.textContent = 'Your allocated assessment geometry and boundary heads are loaded.';
+    exampleSummary.textContent = state.allocation.caseId === 'A'
+      ? 'Allocated Case A: homogeneous baseline for hand and analytical comparison.'
+      : 'Allocated Case B: hydraulic structure for seepage-control design.';
     return;
   }
   const preset = examplePresets.find((item) => item.id === exampleSelect.value);
@@ -654,8 +674,8 @@ function updateExampleSummary(): void {
 
 function generateAndLoadAllocatedScenario(): void {
   try {
-    const allocation = generateAllocatedScenario(studentNumberInput.value);
-    loadAllocatedScenario(allocation);
+    allocatedScenarioPair = generateAllocatedScenarioPair(studentNumberInput.value);
+    loadAllocatedScenario(allocatedScenarioPair.caseA);
     studentNumberInput.value = '';
     clearScenarioError();
   } catch (error) {
@@ -665,7 +685,7 @@ function generateAndLoadAllocatedScenario(): void {
   }
 }
 
-function generateAllocatedScenario(studentNumber: string): AllocatedScenario {
+function generateAllocatedScenarioPair(studentNumber: string): AllocatedScenarioPair {
   if (!/^\d{9}$/.test(studentNumber)) {
     throw new Error('Enter your complete 9-digit student number.');
   }
@@ -695,11 +715,39 @@ function generateAllocatedScenario(studentNumber: string): AllocatedScenario {
   const cutoffFraction = select([0.35, 0.45, 0.55] as const);
   const anisotropyRatio = select([0.25, 0.5, 2, 4] as const);
   const numericalStudy = select(['grid-resolution', 'convergence-tolerance'] as const);
+  const structureDepthFraction = select([0.2, 0.25, 0.3] as const);
+  const [leftSideInsetFraction, rightSideInsetFraction] = select([
+    [0.05, 0.05],
+    [0.05, 0.1],
+    [0.05, 0.15],
+    [0.1, 0.05],
+    [0.1, 0.1],
+    [0.1, 0.15],
+    [0.15, 0.05],
+    [0.15, 0.1],
+    [0.15, 0.15],
+  ] as const);
   const upstreamHead = downstreamHead + headDifference;
   const structureCentre = roundScenarioCoordinate(width * centreFraction);
+  const structureTopHalfWidth = roundScenarioCoordinate(0.2 * width);
+  const structureUnderside = roundScenarioCoordinate(height * (1 - structureDepthFraction));
+  const leftSideInset = roundScenarioCoordinate(width * leftSideInsetFraction);
+  const rightSideInset = roundScenarioCoordinate(width * rightSideInsetFraction);
   const maximumCutoffDepth = roundScenarioCoordinate(height * cutoffFraction);
 
-  const observationPoints: AllocatedObservationPoint[] = [
+  const baselineObservationPoints: AllocatedObservationPoint[] = [
+    { label: 'P1', point: { x: 0.2 * width, y: 0.5 * height } },
+    { label: 'P2', point: { x: 0.5 * width, y: 0.5 * height } },
+    { label: 'P3', point: { x: 0.8 * width, y: 0.5 * height } },
+  ].map((observation) => ({
+    ...observation,
+    point: {
+      x: roundScenarioCoordinate(observation.point.x),
+      y: roundScenarioCoordinate(observation.point.y),
+    },
+  }));
+
+  const structureObservationPoints: AllocatedObservationPoint[] = [
     { label: 'P1', point: { x: structureCentre - 0.15 * width, y: 0.2 * height } },
     { label: 'P2', point: { x: structureCentre - 0.05 * width, y: 0.2 * height } },
     { label: 'P3', point: { x: structureCentre + 0.05 * width, y: 0.2 * height } },
@@ -715,7 +763,7 @@ function generateAllocatedScenario(studentNumber: string): AllocatedScenario {
 
   const anisotropyCode = String(anisotropyRatio).replace('.', 'p');
   const studyCode = numericalStudy === 'grid-resolution' ? 'G' : 'T';
-  const allocationCode = [
+  const pairCode = [
     `FN-W${width}`,
     `H${height}`,
     `U${upstreamHead}`,
@@ -726,17 +774,36 @@ function generateAllocatedScenario(studentNumber: string): AllocatedScenario {
     studyCode,
   ].join('-');
 
-  return {
-    allocationCode,
+  const shared = {
+    pairCode,
     width,
     height,
     upstreamHead,
     downstreamHead,
     structureCentre,
+    structureTopHalfWidth,
+    structureUnderside,
+    leftSideInset,
+    rightSideInset,
     maximumCutoffDepth,
     anisotropyRatio,
     numericalStudy,
-    observationPoints,
+  };
+
+  return {
+    pairCode,
+    caseA: {
+      ...shared,
+      caseId: 'A',
+      allocationCode: `${pairCode}-A`,
+      observationPoints: baselineObservationPoints,
+    },
+    caseB: {
+      ...shared,
+      caseId: 'B',
+      allocationCode: `${pairCode}-B`,
+      observationPoints: structureObservationPoints,
+    },
   };
 }
 
@@ -790,21 +857,23 @@ function loadAllocatedScenario(allocation: AllocatedScenario): void {
     allocation.downstreamHead,
   );
 
-  const structureHalfWidth = 0.15 * allocation.width;
-  const structureUnderside = 0.75 * allocation.height;
-  const structureId = state.nextId++;
-  state.polygons.push({
-    id: structureId,
-    vertices: [
-      { x: allocation.structureCentre - structureHalfWidth, y: structureUnderside },
-      { x: allocation.structureCentre + structureHalfWidth, y: structureUnderside },
-      { x: allocation.structureCentre + structureHalfWidth, y: allocation.height },
-      { x: allocation.structureCentre - structureHalfWidth, y: allocation.height },
-    ],
-    regionType: 'noflow',
-    kx: 1,
-    ky: 1,
-  });
+  if (allocation.caseId === 'B') {
+    const structureTopLeft = allocation.structureCentre - allocation.structureTopHalfWidth;
+    const structureTopRight = allocation.structureCentre + allocation.structureTopHalfWidth;
+    const structureId = state.nextId++;
+    state.polygons.push({
+      id: structureId,
+      vertices: [
+        { x: structureTopLeft + allocation.leftSideInset, y: allocation.structureUnderside },
+        { x: structureTopRight - allocation.rightSideInset, y: allocation.structureUnderside },
+        { x: structureTopRight, y: allocation.height },
+        { x: structureTopLeft, y: allocation.height },
+      ],
+      regionType: 'noflow',
+      kx: 1,
+      ky: 1,
+    });
+  }
   resetBoundaryOrderToLegacyDefault();
 
   domainWidthInput.value = String(state.domain.width);
@@ -847,24 +916,35 @@ function updateAllocationSummary(): void {
   const allocation = state.allocation;
   if (!allocation) {
     scenarioSummary.classList.add('is-hidden');
-    allocationCode.textContent = '';
+    scenarioCaseActions.classList.add('is-hidden');
     allocationDetails.replaceChildren();
     allocationObservationPoints.replaceChildren();
     return;
   }
 
   scenarioSummary.classList.remove('is-hidden');
-  allocationCode.textContent = `Allocation: ${allocation.allocationCode}`;
+  scenarioCaseActions.classList.toggle('is-hidden', allocatedScenarioPair === null);
+  loadScenarioACaseBtn.setAttribute('aria-pressed', String(allocation.caseId === 'A'));
+  loadScenarioBCaseBtn.setAttribute('aria-pressed', String(allocation.caseId === 'B'));
   allocationDetails.replaceChildren();
 
   const details: Array<[string, string]> = [
+    ['Case', allocation.caseId === 'A' ? 'Homogeneous baseline' : 'Hydraulic structure'],
     ['Domain', `${allocation.width} m x ${allocation.height} m`],
     ['Boundary heads', `${allocation.upstreamHead} m upstream; ${allocation.downstreamHead} m downstream`],
-    ['Structure centre', `x = ${formatScenarioNumber(allocation.structureCentre)} m`],
-    ['Maximum cutoff depth', `${formatScenarioNumber(allocation.maximumCutoffDepth)} m`],
-    ['Part C Kx/Ky', formatScenarioNumber(allocation.anisotropyRatio)],
-    ['Numerical study', allocation.numericalStudy === 'grid-resolution' ? 'Grid resolution' : 'Convergence tolerance'],
   ];
+
+  if (allocation.caseId === 'B') {
+    details.push(
+      ['Structure centre', `x = ${formatScenarioNumber(allocation.structureCentre)} m`],
+      ['Structure top width', `${formatScenarioNumber(2 * allocation.structureTopHalfWidth)} m`],
+      ['Structure underside', `y = ${formatScenarioNumber(allocation.structureUnderside)} m`],
+      ['Side insets (L / R)', `${formatScenarioNumber(allocation.leftSideInset)} m / ${formatScenarioNumber(allocation.rightSideInset)} m`],
+      ['Maximum cutoff depth', `${formatScenarioNumber(allocation.maximumCutoffDepth)} m`],
+      ['Part C Kx/Ky', formatScenarioNumber(allocation.anisotropyRatio)],
+      ['Numerical study', allocation.numericalStudy === 'grid-resolution' ? 'Grid resolution' : 'Convergence tolerance'],
+    );
+  }
 
   details.forEach(([term, description]) => {
     const dt = document.createElement('dt');
@@ -927,6 +1007,18 @@ function wireControls(): void {
 
   generateScenarioBtn.addEventListener('click', () => {
     generateAndLoadAllocatedScenario();
+  });
+
+  loadScenarioACaseBtn.addEventListener('click', () => {
+    if (allocatedScenarioPair) {
+      loadAllocatedScenario(allocatedScenarioPair.caseA);
+    }
+  });
+
+  loadScenarioBCaseBtn.addEventListener('click', () => {
+    if (allocatedScenarioPair) {
+      loadAllocatedScenario(allocatedScenarioPair.caseB);
+    }
   });
 
   autoSolveInput.addEventListener('change', () => {
@@ -4624,7 +4716,7 @@ function headColor(head: number, minHead: number, maxHead: number): string {
 
 function exportCanvasPng(): void {
   const link = document.createElement('a');
-  const allocationPrefix = state.allocation ? `${state.allocation.allocationCode}-` : '';
+  const allocationPrefix = state.allocation ? `case-${state.allocation.caseId.toLowerCase()}-` : '';
   link.download = `flownet-${allocationPrefix}${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
@@ -4635,7 +4727,7 @@ function exportStateJson(): void {
 
   const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: 'application/json' });
   const link = document.createElement('a');
-  const allocationPrefix = state.allocation ? `${state.allocation.allocationCode}-` : '';
+  const allocationPrefix = state.allocation ? `case-${state.allocation.caseId.toLowerCase()}-` : '';
   link.download = `flownet-state-${allocationPrefix}${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   link.href = URL.createObjectURL(blob);
   link.click();
@@ -4760,6 +4852,7 @@ function applyPersistedState(imported: PersistedFlowNetStateV1, fileName: string
   state.standpipeReading = null;
   state.standpipePoint = imported.standpipePoint ? clampPoint(imported.standpipePoint) : null;
   state.allocation = imported.allocation ? cloneAllocatedScenario(imported.allocation) : null;
+  allocatedScenarioPair = null;
   state.camera.zoom = 1;
   state.camera.center = { x: 0.5 * state.domain.width, y: 0.5 * state.domain.height };
 
@@ -4830,8 +4923,10 @@ function readOptionalAllocatedScenario(value: unknown): AllocatedScenario | null
     throw new Error('allocation.numericalStudy is invalid.');
   }
 
-  if (!Array.isArray(record.observationPoints) || record.observationPoints.length !== 5) {
-    throw new Error('allocation.observationPoints must contain 5 points.');
+  const caseId: AllocatedCaseId = record.caseId === 'A' ? 'A' : 'B';
+  const expectedObservationCount = caseId === 'A' ? 3 : 5;
+  if (!Array.isArray(record.observationPoints) || record.observationPoints.length !== expectedObservationCount) {
+    throw new Error(`allocation.observationPoints must contain ${expectedObservationCount} points for Case ${caseId}.`);
   }
 
   const observationPoints = record.observationPoints.map((entry, index) => {
@@ -4845,13 +4940,36 @@ function readOptionalAllocatedScenario(value: unknown): AllocatedScenario | null
     };
   });
 
+  const width = readNumberValue(record.width, 'allocation.width', 5, 120);
+  const height = readNumberValue(record.height, 'allocation.height', 3, 60);
+
   return {
+    pairCode: typeof record.pairCode === 'string' && /^FN-[A-Z0-9p.-]+$/.test(record.pairCode)
+      ? record.pairCode
+      : record.allocationCode.replace(/-[AB]$/, ''),
+    caseId,
     allocationCode: record.allocationCode,
-    width: readNumberValue(record.width, 'allocation.width', 5, 120),
-    height: readNumberValue(record.height, 'allocation.height', 3, 60),
+    width,
+    height,
     upstreamHead: readNumberValue(record.upstreamHead, 'allocation.upstreamHead', -200, 200),
     downstreamHead: readNumberValue(record.downstreamHead, 'allocation.downstreamHead', -200, 200),
     structureCentre: readNumberValue(record.structureCentre, 'allocation.structureCentre', 0, 120),
+    structureTopHalfWidth: readOptionalNumberValue(
+      record.structureTopHalfWidth,
+      0,
+      width,
+      0.15 * width,
+      'allocation.structureTopHalfWidth',
+    ),
+    structureUnderside: readOptionalNumberValue(
+      record.structureUnderside,
+      0,
+      height,
+      0.75 * height,
+      'allocation.structureUnderside',
+    ),
+    leftSideInset: readOptionalNumberValue(record.leftSideInset, 0, width, 0, 'allocation.leftSideInset'),
+    rightSideInset: readOptionalNumberValue(record.rightSideInset, 0, width, 0, 'allocation.rightSideInset'),
     maximumCutoffDepth: readNumberValue(record.maximumCutoffDepth, 'allocation.maximumCutoffDepth', 0, 60),
     anisotropyRatio: readNumberValue(record.anisotropyRatio, 'allocation.anisotropyRatio', 0.01, 1000),
     numericalStudy: numericalStudyRaw,

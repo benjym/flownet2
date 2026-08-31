@@ -11,7 +11,7 @@ Students can:
 - Solve and visualize equipotential lines + flow lines
 - Place a standpipe to read hydraulic head and rise
 - Export a PNG of the current canvas
-- Generate a reproducible allocated assessment scenario from a 9-digit student number
+- Generate a reproducible pair of allocated assessment cases from a 9-digit student number
 
 ## Tech Stack
 
@@ -71,20 +71,29 @@ npm run build
 
 ## Allocated Assessment Scenarios
 
-The **Allocated Scenario** panel accepts a 9-digit student number and deterministically selects a
+The **Allocated Cases** panel accepts a 9-digit student number and deterministically selects a
 pre-tested combination of domain dimensions, boundary heads, structure location, maximum cutoff
-depth, anisotropy ratio, observation points, and numerical-sensitivity task.
+depth, anisotropy ratio, observation points, and numerical-sensitivity task. One number always
+produces the same linked pair:
 
-The generated model starts with:
+- **Case A — homogeneous baseline:** a rectangular isotropic domain with three observation points
+  for hand, analytical, and numerical comparison.
+- **Case B — hydraulic structure:** the same domain and boundary heads, with a surface-flush
+  trapezoidal structure, five uplift/design observation points, and the allocated advanced-study
+  parameters. Structure depth and left/right side slopes vary deterministically between students.
+
+Use the Case A and Case B buttons to switch between the generated starting models. Save the current
+case before switching because loading the other case replaces the current model. Case B starts with:
 
 - Two fixed-head side boundaries
-- A common impermeable structure occupying the upper central part of the domain
+- An allocated impermeable trapezoidal structure flush with the ground surface
 - Isotropic material settings for the baseline investigation
 - The standpipe placed at observation point P1
 
 The student number is cleared immediately after generation and is never included in PNG or JSON
-exports. Saved state files retain only the allocation code and scenario parameters, so allocated cases
-can be reopened and checked without retaining the identifying input.
+exports. Each saved state retains only its case-specific allocation code and scenario parameters, so
+the two submitted cases can be reopened and checked without retaining the identifying input.
+The internal allocation code is not shown in the interface or used in download filenames.
 
 When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display to toggle between:
 
