@@ -2,7 +2,10 @@
 
 Interactive Vite + TypeScript web app for teaching 2D anisotropic groundwater flow nets.
 
+[See the live version here](https://benjym.github.io/flownet2/)
+
 Students can:
+
 - Draw boundary conditions (equipotential, phreatic, no-flow)
 - Add impermeable no-flow polygons
 - Solve and visualize equipotential lines + flow lines
@@ -15,7 +18,8 @@ Students can:
 - Vite
 - Vanilla TypeScript (no React)
 - HTML Canvas rendering
-- Playwright end-to-end tests
+- Vitest + jsdom integration tests
+- Vitest unit tests for pure math/geometry helpers
 
 ## Getting Started
 
@@ -31,7 +35,7 @@ npm install
 npm run dev
 ```
 
-Open the URL shown in terminal (usually `http://127.0.0.1:5173` or similar).
+Open the URL shown in terminal (usually `http://127.0.0.1:5180` or similar).
 
 ### 3. Build production bundle
 
@@ -43,21 +47,27 @@ npm run build
 
 1. Start with default boundaries or load a preset from **Examples**.
 2. Use drawing tools:
+
 - `EP line`: fixed hydraulic head
 - `Phreatic`: fixed head equal to elevation
 - `No-flow line`: impermeable barrier
 - `No-flow polygon`: impermeable area (draw initial shape, then edit vertices)
+- Region materials: right-click a selected polygon to set local `Kx`/`Ky` (or keep it impermeable)
 - `Standpipe`: click to read head and water rise
-3. In `Select`, edit polygons:
+
+1. In `Select`, edit polygons:
+
 - Drag polygon vertices to reshape
 - `Alt` + click edge to insert a vertex
 - `Ctrl`/`Cmd` + click a vertex to delete it (minimum 3 kept)
   - Cursor shows `+`/`-` cues for add/remove while modifier keys are held
-4. Keep **Auto-solve** on, or click **Solve now**.
-5. Use **Boundary List** to select/edit items.
-6. Click **Download PNG** to save the visualization.
-7. Use **Save state** to export your current model as JSON.
-8. Use **Load file** (or drag/drop a JSON file onto the page) to restore a saved model.
+  - Right-click a polygon to open region material controls (convert between impermeable and material region)
+
+1. Keep **Auto-solve** on, or click **Solve now**.
+2. Use **Boundary List** to select/edit items.
+3. Click **Download PNG** to save the visualization.
+4. Use **Save state** to export your current model as JSON.
+5. Use **Load file** (or drag/drop a JSON file onto the page) to restore a saved model.
 
 ## Allocated Assessment Scenarios
 
@@ -77,18 +87,23 @@ exports. Saved state files retain only the allocation code and scenario paramete
 can be reopened and checked without retaining the identifying input.
 
 When anisotropy is active (`Kx != Ky`), use **Coordinates** in Solver + Display to toggle between:
+
 - `Real (x, y)`
 - `Transformed (x', y')` where `x' = x*sqrt(Ky/Kx)` and `y' = y`
+
+Material regions are shaded by geometric-mean permeability (`sqrt(Kx*Ky)`), with hatch orientation cues when `Kx != Ky`.
 
 ## Precision Controls (Desktop + Mobile)
 
 Canvas toolbar controls:
-- `+` / `-`: zoom in/out
-- `Pan`: toggle drag-to-pan mode
-- `Fit`: reset to full-domain view
+
+- Mouse wheel / trackpad pinch: zoom in/out
+- Drag empty canvas space in `Select`: pan view
+- Fit-to-screen button: reset to full-domain view
 
 Keyboard shortcuts:
-- `Esc`: cancel in-progress drawing (and exit pan mode)
+
+- `Esc`: cancel in-progress drawing
 - `Delete` / `Backspace`: remove selected boundary/polygon
 
 ## URL Parameters
@@ -100,6 +115,7 @@ Load a preset directly:
 ```
 
 Available preset ids:
+
 - `uniform-ep`
 - `earth-dam`
 - `cutoff-wall`
@@ -108,24 +124,53 @@ Available preset ids:
 - `anisotropic-demo`
 
 Examples:
+
 - `/?example=earth-dam`
 - `/?example=cutoff-wall`
 - `/?example=drain`
 
 ## Testing
 
-Run end-to-end tests:
+Run the primary test suite:
 
 ```bash
-npm run test:e2e
+npm test
 ```
 
-Current suite covers:
-- Student draw/solve/probe/export flow
-- Guidance and keyboard behavior
-- Mobile layout behavior
-- Zoom/pan behavior
-- URL-based preset loading and preset switching
+Run in watch mode during development:
+
+```bash
+npm run test:watch
+```
+
+### Test strategy
+
+The active test stack is browserless and deterministic:
+
+- `tests/app.integration.test.ts`: jsdom-based app integration tests for core workflows
+- `tests/math.unit.test.ts`: fast pure unit tests for extracted math/geometry helpers in `src/math.ts`
+
+Current integration coverage includes:
+
+- textbook mode toggle behavior
+- draw guidance progression and escape cancellation
+- material/void region creation flows
+- select-mode modifier cursor behavior (`Alt`/`Ctrl`)
+- standpipe placement/clearing flow
+- keyboard tool shortcut switching
+- grid snapping and viewport calculations
+
+### Legacy Playwright suite
+
+The previous Playwright suite is archived for reference at:
+
+- `tests-legacy/playwright/student-flow.spec.ts`
+
+It is not part of CI. A helper script is kept for discoverability:
+
+```bash
+npm run test:legacy:e2e
+```
 
 ## CI/CD: GitHub Pages
 
@@ -136,10 +181,13 @@ This repo includes a GitHub Actions workflow at:
 What it does:
 
 1. On every push to `main` and every pull request:
+
 - Installs dependencies
 - Builds the app
-- Runs Playwright E2E tests
-2. On pushes to `main` only:
+- Runs Vitest test suite (`npm test`)
+
+1. On pushes to `main` only:
+
 - Builds with the correct GitHub Pages base path
 - Publishes `dist/` to GitHub Pages
 

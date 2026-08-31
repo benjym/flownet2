@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 test.describe('Flow Net Studio student workflow', () => {
   interface PresetFixture {
@@ -30,23 +30,42 @@ test.describe('Flow Net Studio student workflow', () => {
   const presetPolygonCount = (preset: PresetFixture): number =>
     Array.isArray(preset.polygons) ? preset.polygons.length : 0;
 
-  const inventorySummaryText = (lineCount: number, polygonCount: number): string =>
-    `${lineCount} line BCs + ${polygonCount} no-flow polygons`;
+  const lineItemPattern = /EP #|Phreatic #|(?:No-flow|Impermeable) line #/;
+  const noFlowPolygonItemPattern = /(?:No-flow|Impermeable) polygon #/;
+  const materialRegionItemPattern = /Material region #/;
 
-  const parseInventorySummary = (text: string): [number, number] => {
-    const match = text.match(/(\d+) line BCs \+ (\d+) no-flow polygons/);
-    if (!match) {
-      throw new Error(`Unable to parse inventory summary: ${text}`);
+  const inventoryCounts = async (
+    page: Page,
+  ): Promise<{ lines: number; noFlowPolygons: number; materialRegions: number }> => {
+    const items = page.locator('#inventoryList .inventory-item');
+    const count = await items.count();
+    let lines = 0;
+    let noFlowPolygons = 0;
+    let materialRegions = 0;
+    for (let i = 0; i < count; i++) {
+      const text = (await items.nth(i).innerText()).trim();
+      if (lineItemPattern.test(text)) {
+        lines += 1;
+      } else if (noFlowPolygonItemPattern.test(text)) {
+        noFlowPolygons += 1;
+      } else if (materialRegionItemPattern.test(text)) {
+        materialRegions += 1;
+      }
     }
-    return [Number(match[1]), Number(match[2])];
+    return { lines, noFlowPolygons, materialRegions };
   };
 
-  const parseXRange = (text: string): [number, number] => {
-    const match = text.match(/x:([0-9.]+)-([0-9.]+)m/);
+  const parseCursorReadout = (text: string): { xLabel: string; x: number; yLabel: string; y: number } => {
+    const match = text.match(/^(x'?):\s*([-0-9.]+),\s*(y'?):\s*([-0-9.]+)$/);
     if (!match) {
-      throw new Error(`Unable to parse x-range from: ${text}`);
+      throw new Error(`Unable to parse cursor readout: ${text}`);
     }
-    return [Number(match[1]), Number(match[2])];
+    return {
+      xLabel: match[1],
+      x: Number(match[2]),
+      yLabel: match[3],
+      y: Number(match[4]),
+    };
   };
 
   const parseStandpipePoint = (text: string): [number, number] => {
@@ -57,13 +76,20 @@ test.describe('Flow Net Studio student workflow', () => {
     return [Number(match[1]), Number(match[2])];
   };
 
+  const parseNoFlowPolygonId = (text: string): number => {
+    const match = text.match(/(?:No-flow|Impermeable) polygon #(\d+)/);
+    if (!match) {
+      throw new Error(`Unable to parse polygon id from: ${text}`);
+    }
+    return Number(match[1]);
+  };
+
   test('student can draw BCs, solve, probe with standpipe, and export PNG', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Flow Net Studio' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Flow Nets' })).toBeVisible();
     await expect(page.locator('#statusText')).toContainText('Solved');
-    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
-    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
+    const { lines: startingLines, noFlowPolygons: startingPolygons } = await inventoryCounts(page);
 
     const canvas = page.locator('#flowCanvas');
     await expect(canvas).toBeVisible();
@@ -84,26 +110,24 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.click(point(0.24, 0.32).x, point(0.24, 0.32).y);
     await expect(page.locator('#toolStep')).toContainText('Step 2 of 2');
     await page.mouse.click(point(0.76, 0.24).x, point(0.76, 0.24).y);
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(startingLines + 1, startingPolygons),
-    );
+    await expect.poll(async () => (await inventoryCounts(page)).lines).toBe(startingLines + 1);
 
     await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
     await page.mouse.move(point(0.42, 0.53).x, point(0.42, 0.53).y);
     await page.mouse.down();
     await page.mouse.move(point(0.58, 0.68).x, point(0.58, 0.68).y);
     await page.mouse.up();
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(startingLines + 1, startingPolygons + 1),
-    );
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe(`${startingLines + 1}/${startingPolygons + 1}`);
 
     await page.getByRole('button', { name: /Phreatic #/ }).click();
-    await expect(page.locator('#selectionType')).toContainText('Phreatic line');
+    await expect(page.locator('#deleteBtn')).not.toHaveClass(/is-hidden/);
 
     await page.getByRole('button', { name: 'Standpipe' }).click();
     await page.mouse.click(point(0.52, 0.45).x, point(0.52, 0.45).y);
 
-    await page.getByRole('button', { name: 'Solve now' }).click();
     await expect(page.locator('#statusText')).toContainText('Solved');
 
     const standpipe = page.locator('#standpipeText');
@@ -111,7 +135,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(standpipe).toContainText('water rise');
 
     const downloadPromise = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Download PNG' }).click();
+    await page.getByRole('button', { name: 'Save PNG' }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^flownet-.*\.png$/);
 
@@ -120,8 +144,7 @@ test.describe('Flow Net Studio student workflow', () => {
 
   test('draw guidance supports first-click/second-click flow and Esc cancellation', async ({ page }) => {
     await page.goto('/');
-    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
-    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
+    const { lines: startingLines, noFlowPolygons: startingPolygons } = await inventoryCounts(page);
 
     const canvas = page.locator('#flowCanvas');
     const box = await canvas.boundingBox();
@@ -140,9 +163,10 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#toolStep')).toContainText('Step 1 of 2');
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(startingLines, startingPolygons),
-    );
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe(`${startingLines}/${startingPolygons}`);
   });
 
   test('anisotropy change updates solver status', async ({ page }) => {
@@ -159,6 +183,86 @@ test.describe('Flow Net Studio student workflow', () => {
     await kx.dispatchEvent('change');
 
     await expect(page.locator('#statusText')).toContainText('isotropic');
+  });
+
+  test('reordering boundary list updates line z-order hit selection', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const clickCanvas = async (rx: number, ry: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
+    };
+
+    await page.locator('#toolRow button[data-tool="equipotential"]').click();
+    await clickCanvas(0.32, 0.44);
+    await clickCanvas(0.68, 0.44);
+
+    await page.locator('#toolRow button[data-tool="noflow-line"]').click();
+    await clickCanvas(0.32, 0.44);
+    await clickCanvas(0.68, 0.44);
+
+    await page.locator('#toolRow button[data-tool="select"]').click();
+    await clickCanvas(0.32, 0.44);
+    await expect(page.locator('#selectedHeadRow')).toHaveClass(/is-hidden/);
+
+    const epLineItem = page.locator('#inventoryList .inventory-item', { hasText: /^EP #/ }).first();
+    const noFlowLineItem = page.locator('#inventoryList .inventory-item', { hasText: /^(?:No-flow|Impermeable) line #/ }).first();
+    await epLineItem.dragTo(noFlowLineItem, { targetPosition: { x: 8, y: 2 } });
+
+    await clickCanvas(0.32, 0.44);
+    await expect(page.locator('#selectedHeadRow')).not.toHaveClass(/is-hidden/);
+  });
+
+  test('reordering boundary list updates polygon z-order hit selection', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const clickCanvas = async (rx: number, ry: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
+    };
+    const dragCanvasRect = async (startRx: number, startRy: number, endRx: number, endRy: number): Promise<void> => {
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) {
+        throw new Error('Canvas bounding box was null');
+      }
+      await page.mouse.move(box.x + box.width * startRx, box.y + box.height * startRy);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * endRx, box.y + box.height * endRy);
+      await page.mouse.up();
+    };
+
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
+    await dragCanvasRect(0.38, 0.48, 0.58, 0.68);
+    await dragCanvasRect(0.45, 0.55, 0.65, 0.75);
+
+    await page.locator('#toolRow button[data-tool="select"]').click();
+
+    const polygonItems = page.locator('#inventoryList .inventory-item', { hasText: /^(?:No-flow|Impermeable) polygon #/ });
+    const topPolygonItem = polygonItems.nth(0);
+    const secondPolygonItem = polygonItems.nth(1);
+    const topPolygonId = parseNoFlowPolygonId(await topPolygonItem.innerText());
+    const secondPolygonId = parseNoFlowPolygonId(await secondPolygonItem.innerText());
+
+    await clickCanvas(0.53, 0.63);
+    await expect(page.locator('#inventoryList .inventory-item.is-selected').first())
+      .toContainText(new RegExp(`(?:No-flow|Impermeable) polygon #${topPolygonId}`));
+
+    await secondPolygonItem.dragTo(topPolygonItem, { targetPosition: { x: 8, y: 2 } });
+
+    await clickCanvas(0.53, 0.63);
+    await expect(page.locator('#inventoryList .inventory-item.is-selected').first())
+      .toContainText(new RegExp(`(?:No-flow|Impermeable) polygon #${secondPolygonId}`));
   });
 
   test('mobile layout keeps canvas visible and above controls', async ({ page }) => {
@@ -237,6 +341,7 @@ test.describe('Flow Net Studio student workflow', () => {
     const flTool = page.locator('#toolRow button[data-tool="noflow-line"]');
     const phreaticTool = page.locator('#toolRow button[data-tool="phreatic"]');
     const impermeableAreaTool = page.locator('#toolRow button[data-tool="noflow-zone"]');
+    const materialAreaTool = page.locator('#toolRow button[data-tool="soil"]');
     const standpipeTool = page.locator('#toolRow button[data-tool="standpipe"]');
 
     await expect(selectTool).toHaveAttribute('title', /Space/);
@@ -244,6 +349,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(flTool).toHaveAttribute('title', /\(F\)/);
     await expect(phreaticTool).toHaveAttribute('title', /\(P\)/);
     await expect(impermeableAreaTool).toHaveAttribute('title', /\(I\)/);
+    await expect(materialAreaTool).toHaveAttribute('title', /\(M\)/);
     await expect(standpipeTool).toHaveAttribute('title', /\(S\)/);
 
     await page.locator('#flowCanvas').click();
@@ -260,6 +366,11 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await page.keyboard.press('i');
     await expect(impermeableAreaTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newMaterialWrap')).toHaveClass(/is-hidden/);
+
+    await page.keyboard.press('m');
+    await expect(materialAreaTool).toHaveClass(/is-active/);
+    await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
 
     await page.keyboard.press('s');
     await expect(standpipeTool).toHaveClass(/is-active/);
@@ -267,6 +378,7 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.keyboard.press('Space');
     await expect(selectTool).toHaveClass(/is-active/);
     await expect(page.locator('#newHeadWrap')).toHaveClass(/is-hidden/);
+    await expect(page.locator('#newMaterialWrap')).toHaveClass(/is-hidden/);
   });
 
   test('standpipe can be repositioned by click-drag', async ({ page }) => {
@@ -302,58 +414,26 @@ test.describe('Flow Net Studio student workflow', () => {
 
   test('Delete key removes selected boundary from inventory', async ({ page }) => {
     await page.goto('/');
-    const startingSummary = (await page.locator('#inventorySummary').innerText()).trim();
-    const [startingLines, startingPolygons] = parseInventorySummary(startingSummary);
+    const { lines: startingLines, noFlowPolygons: startingPolygons } = await inventoryCounts(page);
     expect(startingLines).toBeGreaterThan(0);
 
     const firstLineItem = page
       .locator('#inventoryList .inventory-item')
-      .filter({ hasText: /EP #|Phreatic #|No-flow line #/ })
+      .filter({ hasText: lineItemPattern })
       .first();
     await firstLineItem.click();
-    await expect(page.locator('#selectionType')).not.toContainText('Nothing selected.');
+    await expect(page.locator('#deleteBtn')).not.toHaveClass(/is-hidden/);
 
     await page.keyboard.press('Delete');
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(startingLines - 1, startingPolygons),
-    );
-    await expect(page.locator('#selectionType')).toContainText('Nothing selected.');
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe(`${startingLines - 1}/${startingPolygons}`);
+    await expect(page.locator('#deleteBtn')).toHaveClass(/is-hidden/);
   });
 
-  test('zoom controls update view extents for precision drawing', async ({ page }) => {
+  test('wheel zoom updates cursor coordinates for precision drawing', async ({ page }) => {
     await page.goto('/');
-    const selectedPresetId = await page.locator('#exampleSelect').inputValue();
-    const selectedPreset = presetFor(selectedPresetId);
-    const transformedByDefault =
-      selectedPreset.view.coordinateMode === 'transformed' &&
-      Math.abs(selectedPreset.solver.kx - selectedPreset.solver.ky) > 1e-9;
-    const displayScaleX = transformedByDefault ? Math.sqrt(selectedPreset.solver.ky / selectedPreset.solver.kx) : 1;
-
-    await expect(page.locator('#zoomLabel')).toHaveText('100%');
-    const promptBefore = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [beforeMin, beforeMax] = parseXRange(promptBefore);
-    expect(beforeMin).toBeCloseTo(0, 1);
-    expect(beforeMax).toBeCloseTo(selectedPreset.domain.width * displayScaleX, 1);
-
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await expect(page.locator('#zoomLabel')).toHaveText('125%');
-
-    const promptAfter = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [afterMin, afterMax] = parseXRange(promptAfter);
-    expect(afterMin).toBeGreaterThan(beforeMin);
-    expect(afterMax).toBeLessThan(beforeMax);
-  });
-
-  test('pan mode drag shifts viewed x-range', async ({ page }) => {
-    await page.goto('/');
-
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await page.getByRole('button', { name: 'Pan: Off' }).click();
-    await expect(page.getByRole('button', { name: 'Pan: On' })).toBeVisible();
-
-    const promptBefore = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [beforeMin] = parseXRange(promptBefore);
 
     const canvas = page.locator('#flowCanvas');
     const box = await canvas.boundingBox();
@@ -362,14 +442,47 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Canvas bounding box was null');
     }
 
+    const focus = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+    const probe = { x: box.x + box.width * 0.82, y: box.y + box.height * 0.5 };
+
+    await page.mouse.move(probe.x, probe.y);
+    const before = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+
+    await page.mouse.move(focus.x, focus.y);
+    await page.mouse.wheel(0, -600);
+    await page.mouse.move(probe.x, probe.y);
+
+    const after = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(after.xLabel).toBe(before.xLabel);
+    expect(after.x).toBeLessThan(before.x - 0.25);
+  });
+
+  test('dragging empty canvas in Select pans the viewed range', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const focus = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
+    const probe = { x: box.x + box.width * 0.65, y: box.y + box.height * 0.5 };
+
+    await page.mouse.move(focus.x, focus.y);
+    await page.mouse.wheel(0, -600);
+    await page.mouse.move(probe.x, probe.y);
+    const before = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+
     await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.5);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
     await page.mouse.up();
 
-    const promptAfter = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [afterMin] = parseXRange(promptAfter);
-    expect(afterMin).toBeLessThan(beforeMin);
+    await page.mouse.move(probe.x, probe.y);
+    const after = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(after.x).toBeLessThan(before.x - 0.25);
   });
 
   test('url parameter loads canonical example case', async ({ page }) => {
@@ -379,11 +492,12 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#exampleSelect')).toHaveValue('drain');
     await expect(page.locator('#exampleSummary')).toContainText(drainPreset.summary);
     await expect(page.locator('#domainWidth')).toHaveValue(String(drainPreset.domain.width));
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(presetLineCount(drainPreset), presetPolygonCount(drainPreset)),
-    );
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe(`${presetLineCount(drainPreset)}/${presetPolygonCount(drainPreset)}`);
     if (presetPolygonCount(drainPreset) > 0) {
-      await expect(page.getByRole('button', { name: /No-flow polygon #/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /(?:No-flow|Impermeable) polygon #/ })).toBeVisible();
     }
   });
 
@@ -395,9 +509,10 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await expect(page.locator('#domainWidth')).toHaveValue(String(drainPreset.domain.width));
     await expect(page.locator('#kx')).toHaveValue(String(drainPreset.solver.kx));
-    await expect(page.locator('#inventorySummary')).toContainText(
-      inventorySummaryText(presetLineCount(drainPreset), presetPolygonCount(drainPreset)),
-    );
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe(`${presetLineCount(drainPreset)}/${presetPolygonCount(drainPreset)}`);
     if (drainPreset.standpipePoint) {
       await expect(page.locator('#standpipeText')).not.toContainText('Choose the standpipe tool');
     }
@@ -430,18 +545,18 @@ test.describe('Flow Net Studio student workflow', () => {
     await page.mouse.move(end.x, end.y);
     await page.mouse.up();
 
-    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /(?:No-flow|Impermeable) polygon #\d+ \(4 vertices\)/ })).toBeVisible();
 
     await page.getByRole('button', { name: 'Select', exact: true }).click();
     await page.keyboard.down('Alt');
     await page.mouse.click(midTopX, topY);
     await page.keyboard.up('Alt');
-    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(5 vertices\)/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /(?:No-flow|Impermeable) polygon #\d+ \(5 vertices\)/ })).toBeVisible();
 
     await page.keyboard.down('Control');
     await page.mouse.click(rightX, topY);
     await page.keyboard.up('Control');
-    await expect(page.getByRole('button', { name: /No-flow polygon #\d+ \(4 vertices\)/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /(?:No-flow|Impermeable) polygon #\d+ \(4 vertices\)/ })).toBeVisible();
   });
 
   test('selected line supports alt-add and ctrl-delete vertices only on selected object', async ({ page }) => {
@@ -474,8 +589,8 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const blockedState = JSON.parse(fs.readFileSync(blockedPath, 'utf8'));
-    const blockedLine1 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
-    const blockedLine2 = blockedState.lineBoundaries.find((line: { id: number }) => line.id === 2);
+    const blockedLine1 = blockedState.lines.find((line: { id: number }) => line.id === 1);
+    const blockedLine2 = blockedState.lines.find((line: { id: number }) => line.id === 2);
     expect(blockedLine1.vertices).toHaveLength(2);
     expect(blockedLine2.vertices).toHaveLength(2);
 
@@ -493,7 +608,7 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const addedState = JSON.parse(fs.readFileSync(addPath, 'utf8'));
-    const addedLine1 = addedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    const addedLine1 = addedState.lines.find((line: { id: number }) => line.id === 1);
     expect(addedLine1.vertices).toHaveLength(3);
 
     await page.keyboard.down('Control');
@@ -509,7 +624,7 @@ test.describe('Flow Net Studio student workflow', () => {
       throw new Error('Save-state download path was null');
     }
     const removedState = JSON.parse(fs.readFileSync(removePath, 'utf8'));
-    const removedLine1 = removedState.lineBoundaries.find((line: { id: number }) => line.id === 1);
+    const removedLine1 = removedState.lines.find((line: { id: number }) => line.id === 1);
     expect(removedLine1.vertices).toHaveLength(2);
   });
 
@@ -563,20 +678,130 @@ test.describe('Flow Net Studio student workflow', () => {
     await expect(page.locator('#statusText')).toContainText('anisotropic');
     await expect(page.locator('#coordMode')).toHaveValue('real');
 
-    const promptReal = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [realMin, realMax] = parseXRange(promptReal);
-    expect(realMin).toBeCloseTo(0, 1);
-    expect(realMax).toBeCloseTo(anisotropicPreset.domain.width, 1);
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+
+    const probe = { x: box.x + box.width * 0.78, y: box.y + box.height * 0.52 };
+    await page.mouse.move(probe.x, probe.y);
+    const realReadout = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(realReadout.xLabel).toBe('x');
+    expect(realReadout.yLabel).toBe('y');
 
     await page.selectOption('#coordMode', 'transformed');
     await expect(page.locator('#coordMode')).toHaveValue('transformed');
-    await expect(page.locator('#canvasPrompt')).toContainText("coords: transformed");
+    await page.mouse.move(probe.x, probe.y);
+    const transformedReadout = parseCursorReadout((await page.locator('#cursorReadout').innerText()).trim());
+    expect(transformedReadout.xLabel).toBe("x'");
+    expect(transformedReadout.yLabel).toBe("y'");
 
-    const promptTransformed = (await page.locator('#canvasPrompt').innerText()).trim();
-    const [transformedMin, transformedMax] = parseXRange(promptTransformed);
-    const transformedWidth = anisotropicPreset.domain.width * Math.sqrt(anisotropicPreset.solver.ky / anisotropicPreset.solver.kx);
-    expect(transformedMin).toBeCloseTo(0, 1);
-    expect(transformedMax).toBeCloseTo(transformedWidth, 1);
+    expect(Math.sqrt(anisotropicPreset.solver.ky / anisotropicPreset.solver.kx)).toBeLessThan(1);
+    expect(transformedReadout.x).toBeLessThan(realReadout.x - 0.5);
+  });
+
+  test('polygon can be converted to a material region with right-click editing', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) {
+      throw new Error('Canvas bounding box was null');
+    }
+    const point = (rx: number, ry: number) => ({
+      x: box.x + box.width * rx,
+      y: box.y + box.height * ry,
+    });
+
+    const polygonStart = point(0.42, 0.53);
+    const polygonEnd = point(0.58, 0.68);
+    const polygonCenter = point(0.5, 0.61);
+
+    await page.locator('#toolRow button[data-tool="noflow-zone"]').click();
+    await page.mouse.move(polygonStart.x, polygonStart.y);
+    await page.mouse.down();
+    await page.mouse.move(polygonEnd.x, polygonEnd.y);
+    await page.mouse.up();
+
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.mouse.click(polygonCenter.x, polygonCenter.y, { button: 'right' });
+
+    await expect(page.locator('#selectedPolygonMaterialPanel')).not.toHaveClass(/is-hidden/);
+    await expect(page.locator('#selectedPolygonMaterialToggleBtn')).toContainText('Convert to material');
+
+    const selectedKx = page.locator('#selectedPolygonKx');
+    const selectedKy = page.locator('#selectedPolygonKy');
+    await selectedKx.fill('9');
+    await selectedKx.dispatchEvent('change');
+    await selectedKy.fill('1');
+    await selectedKy.dispatchEvent('change');
+    await page.locator('#selectedPolygonMaterialToggleBtn').click();
+
+    await expect.poll(async () => (await inventoryCounts(page)).materialRegions).toBe(1);
+    await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
+
+    const saveDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const saveDownload = await saveDownloadPromise;
+    const savePath = await saveDownload.path();
+    expect(savePath).not.toBeNull();
+    if (!savePath) {
+      throw new Error('Save-state download path was null');
+    }
+    const savedState = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+    expect(savedState.polygons[0].regionType).toBe('material');
+    expect(savedState.polygons[0].kx).toBe(9);
+    expect(savedState.polygons[0].ky).toBe(1);
+
+    await page.setInputFiles('#loadStateInput', {
+      name: 'material-region-state.flownet2.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(savedState)),
+    });
+    await expect(page.getByRole('button', { name: /Material region #/ })).toBeVisible();
+  });
+
+  test('material area tool creates a material region directly', async ({ page }) => {
+    await page.goto('/');
+
+    const canvas = page.locator('#flowCanvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const point = (rx: number, ry: number) => ({
+      x: box!.x + box!.width * rx,
+      y: box!.y + box!.height * ry,
+    });
+
+    await page.locator('#toolRow button[data-tool="soil"]').click();
+    await expect(page.locator('#newMaterialWrap')).not.toHaveClass(/is-hidden/);
+
+    const newMaterialKxInput = page.locator('#newMaterialKx');
+    const newMaterialKyInput = page.locator('#newMaterialKy');
+    await newMaterialKxInput.fill('7');
+    await newMaterialKyInput.fill('3');
+
+    const polygonStart = point(0.34, 0.26);
+    const polygonEnd = point(0.49, 0.41);
+    await page.mouse.move(polygonStart.x, polygonStart.y);
+    await page.mouse.down();
+    await page.mouse.move(polygonEnd.x, polygonEnd.y);
+    await page.mouse.up();
+
+    await expect.poll(async () => (await inventoryCounts(page)).materialRegions).toBe(1);
+    await expect(page.locator('#selectedPolygonMaterialToggleBtn')).toContainText('Set as impermeable');
+
+    const saveDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save state' }).click();
+    const saveDownload = await saveDownloadPromise;
+    const savePath = await saveDownload.path();
+    expect(savePath).not.toBeNull();
+    const savedState = JSON.parse(fs.readFileSync(savePath as string, 'utf8'));
+    expect(savedState.polygons[0].regionType).toBe('material');
+    expect(savedState.polygons[0].kx).toBe(7);
+    expect(savedState.polygons[0].ky).toBe(3);
   });
 
   test('student can load a saved state JSON file', async ({ page }) => {
@@ -590,7 +815,7 @@ test.describe('Flow Net Studio student workflow', () => {
       solver: { nx: 101, ny: 51, kx: 2, ky: 1, maxIter: 5000, tolerance: 0.0001, omega: 1.6 },
       view: { contours: 12, streamlines: 10, autoSolve: true, coordinateMode: 'real' },
       newHead: 11,
-      lineBoundaries: [
+      lines: [
         {
           id: 1,
           kind: 'equipotential',
@@ -623,7 +848,10 @@ test.describe('Flow Net Studio student workflow', () => {
 
     await expect(page.locator('#domainWidth')).toHaveValue('44');
     await expect(page.locator('#domainHeight')).toHaveValue('14');
-    await expect(page.locator('#inventorySummary')).toContainText('1 line BCs + 1 no-flow polygons');
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe('1/1');
     await expect(page.locator('#newHead')).toHaveValue('11');
     await expect(page.locator('#exampleSummary')).toContainText('Loaded from file');
     await expect(page.locator('#statusText')).toContainText('Solved');
@@ -650,7 +878,10 @@ test.describe('Flow Net Studio student workflow', () => {
     expect(firstCode).toMatch(/^Allocation: FN-/);
     await expect(page.locator('#studentNumber')).toHaveValue('');
     await expect(page.locator('#exampleSelect')).toHaveValue('__allocated__');
-    await expect(page.locator('#inventorySummary')).toContainText('2 line BCs + 1 no-flow polygons');
+    await expect.poll(async () => {
+      const counts = await inventoryCounts(page);
+      return `${counts.lines}/${counts.noFlowPolygons}`;
+    }).toBe('2/1');
     await expect(page.locator('#allocationObservationPoints li')).toHaveCount(5);
     await expect(page.locator('#kx')).toHaveValue('1');
     await expect(page.locator('#ky')).toHaveValue('1');
@@ -688,7 +919,7 @@ test.describe('Flow Net Studio student workflow', () => {
     expect(page.url()).not.toContain('987654321');
     expect(savedState.allocation.allocationCode).toMatch(/^FN-/);
     expect(savedState.allocation.observationPoints).toHaveLength(5);
-    expect(savedState.lineBoundaries).toHaveLength(2);
+    expect(savedState.lines).toHaveLength(2);
     expect(savedState.polygons).toHaveLength(1);
 
     await page.selectOption('#exampleSelect', 'uniform-ep');
