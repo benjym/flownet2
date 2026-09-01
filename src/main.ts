@@ -3357,8 +3357,12 @@ function buildSeeds(
   const duplicateSpacing = 0.05 * cellSize;
   const candidateSeeds: Point[] = [];
 
-  for (let idx = 1; idx <= count; idx += 1) {
-    const defaultT = idx / (count + 1);
+  // For even counts, use count+1 placement positions so that t=0.5 (the axis of
+  // symmetry) is always included. The extra candidate is trimmed by slice(0, count).
+  const placementCount = count % 2 === 0 ? count + 1 : count;
+
+  for (let idx = 1; idx <= placementCount; idx += 1) {
+    const defaultT = idx / (placementCount + 1);
     let base = samplePointOnPolyline(seedVertices, defaultT);
     let tangent = estimatePolylineTangent(seedVertices, defaultT);
     let normal = chooseInwardNormal(
@@ -3405,8 +3409,8 @@ function buildSeeds(
   }
 
   if (seeds.length < count) {
-    for (let idx = 1; idx <= count && seeds.length < count; idx += 1) {
-      const t = idx / (count + 1);
+    for (let idx = 1; idx <= placementCount && seeds.length < count; idx += 1) {
+      const t = idx / (placementCount + 1);
       const base = samplePointOnPolyline(seedVertices, t);
       const tangent = estimatePolylineTangent(seedVertices, t);
       const normal = chooseInwardNormal(base, tangent, center, domain, solver, active, stepNudge);
